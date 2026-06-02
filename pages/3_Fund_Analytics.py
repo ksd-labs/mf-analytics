@@ -1,0 +1,320 @@
+"""
+pages/3_Fund_Analytics.py
+==========================
+Fund Analytics — Deep Dive
+
+The most detailed view in the platform. For a single selected fund it shows:
+  - 4 KPI metric cards at the top
+  - Tab 1 — Charts:  All 6 charts (NAV, Drawdown, Rolling 1Y, Rolling 3Y)
+  - Tab 2 — Metrics: All 31 scalar metrics in a formatted table
+  - Tab 3 — Quartiles: Q1–Q4 badges per metric (requires category analytics)
+  - Tab 4 — Data Quality: Coverage report for this fund
+"""
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+
+from data.fund_loader      import get_nav_history, get_all_categorized_schemes
+from analytics.engine      import compute_fund_metrics
+from visualizations        import (
+    plot_single_nav,
+    plot_drawdown,
+    plot_rolling_combined,
+)
+from utils.constants       import CATEGORIES, APP_TITLE, APP_ICON, METRIC_LABELS
+from utils.formatters      import fmt_pct, fmt_ratio, fmt_days, fmt_nav, fmt_date
+from utils.validators      import build_quality_report, get_data_coverage
+
+st.set_page_config(
+    page_title = "Fund Analytics — MF Analytics",
+    page_icon  = "📋",
+    layout     = "wide",
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SIDEBAR
+# ─────────────────────────────────────────────────────────────────────────────
+
+with st.sidebar:
+    st.title(f"{APP_ICON} {APP_TITLE}")
+    st.divider()
+
+    category = st.selectbox(
+        "📂 Category",
+        CATEGORIES,
+        index = CATEGORIES.index(st.session_state.get("selected_category", "Large Cap")),
+    )
+    st.session_state["selected_category"] = category
+
+    # Load fund list for selected category
+    with st.spinner("Loading funds…"):
+        all_cat   = get_all_categorized_schemes()
+        fund_list = all_cat.get(category, [])
+
+    if not fund_list:
+        st.warning("No funds found.")
+        st.stop()
+
+    fund_names = [f["name"] for f in fund_list]
+    fund_codes = {f["name"]: f["code"] for f in fund_list}
+
+    prev_fund = st.session_state.get("selected_fund", fund_names[0])
+    default_idx = fund_names.index(prev_fund) if prev_fund in fund_names else 0
+
+    selected_name = st.selectbox(
+        "🏦 Select Fund",
+        fund_names,
+        index   = default_idx,
+        help    = "Select a fund to analyse.",
+    )
+    st.session_state["selected_fund"] = selected_name
+    selected_code = fund_codes[selected_name]
+
+    st.divider()
+    rf_pct = st.slider(
+        "Risk-Free Rate (%)", 4.0, 9.0,
+        st.session_state.get("rf_rate", 6.5), 0.1,
+    )
+    rf_rate = rf_pct / 100
+    st.session_state["rf_rate"] = rf_pct
+
+    st.divider()
+    if st.button("🔄 Refresh NAV Data", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LOAD + COMPUTE
+# ─────────────────────────────────────────────────────────────────────────────
+
+st.title(f"📋 Fund Analytics")
+
+cache_key = f"fund_metrics_{selected_code}_{rf_pct}"
+if cache_key not in st.session_state:
+    with st.spinner(f"Loading NAV history for {selected_name[:60]}…"):
+        nav_df = get_nav_history(selected_code)
+    with st.spinner("Computing metrics…"):
+        metrics = compute_fund_metrics(nav_df, rf_rate=rf_rate, fund_name=selected_name)
+    st.session_state[cache_key] = metrics
+else:
+    metrics = st.session_state[cache_key]
+
+if not metrics.get("is_valid"):
+    st.error(f"Could not compute metrics for **{selected_name}**.")
+    for w in metrics.get("warnings", []):
+        st.warning(w)
+    st.stop()
+
+# Show any warnings (e.g. minor missing data)
+for w in metrics.get("warnings", []):
+    st.warning(w)
+
+summary = metrics.get("summary", {})
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FUND HEADER
+# ─────────────────────────────────────────────────────────────────────────────
+
+st.subheader(selected_name)
+st.caption(
+    f"Category: **{category}**  |  "
+    f"Scheme Code: `{selected_code}`  |  "
+    f"Inception: {fmt_date(summary.get('start_date'))}  |  "
+    f"History: {summary.get('history_years', 'N/A')} years  |  "
+    f"Latest NAV: {fmt_nav(summary.get('current_nav'))}  "
+    f"({fmt_date(summary.get('end_date'))})"
+)
+st.divider()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# KPI CARDS
+# ─────────────────────────────────────────────────────────────────────────────
+
+k1, k2, k3, k4, k5, k6 = st.columns(6)
+
+def _kpi(col, label, value, is_pct=True, is_ratio=False, invert_color=False):
+    """Render a metric card with conditional colouring."""
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        col.metric(label, "N/A")
+        return
+    if is_pct:
+        disp = fmt_pct(value)
+        delta_str = f"{value*100:+.2f}%" if not invert_color else None
+    elif is_ratio:
+        disp = fmt_ratio(value)
+        delta_str = f"{value:+.3f}" if not invert_color else None
+    else:
+        disp = str(value)
+        delta_str = None
+    col.metric(label, disp)
+
+_kpi(k1, "3Y CAGR",       metrics.get("cagr_3y"),               is_pct=True)
+_kpi(k2, "1Y CAGR",       metrics.get("cagr_1y"),               is_pct=True)
+_kpi(k3, "Ann. Volatility",metrics.get("annualized_volatility"), is_pct=True)
+_kpi(k4, "Max Drawdown",   metrics.get("max_drawdown"),          is_pct=True)
+_kpi(k5, "Sharpe Ratio",   metrics.get("sharpe"),                is_pct=False, is_ratio=True)
+_kpi(k6, "Win Rate",       metrics.get("win_rate"),              is_pct=True)
+
+st.divider()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TABS
+# ─────────────────────────────────────────────────────────────────────────────
+
+tab_charts, tab_metrics, tab_quality = st.tabs([
+    "📈 Charts",
+    "📊 All Metrics",
+    "🔬 Data Quality",
+])
+
+# ── TAB 1: CHARTS ─────────────────────────────────────────────────────────────
+with tab_charts:
+
+    nav = metrics.get("nav")
+    dd  = metrics.get("drawdown_series")
+    s1  = metrics.get("_series_1y")
+    s3  = metrics.get("_series_3y")
+
+    # NAV + Drawdown side by side
+    row1_l, row1_r = st.columns(2, gap="medium")
+    with row1_l:
+        if nav is not None:
+            st.plotly_chart(
+                plot_single_nav(nav, selected_name),
+                use_container_width=True,
+            )
+        else:
+            st.warning("NAV chart not available.")
+
+    with row1_r:
+        if dd is not None:
+            st.plotly_chart(
+                plot_drawdown({selected_name: dd}),
+                use_container_width=True,
+            )
+        else:
+            st.warning("Drawdown chart not available.")
+
+    # Rolling returns
+    if s1 is not None:
+        st.plotly_chart(
+            plot_rolling_combined({selected_name: s1}, window_label="1-Year", height=650),
+            use_container_width=True,
+        )
+    else:
+        st.info("1-Year rolling returns require at least 2 years of NAV history.")
+
+    if s3 is not None:
+        st.plotly_chart(
+            plot_rolling_combined({selected_name: s3}, window_label="3-Year", height=650),
+            use_container_width=True,
+        )
+    else:
+        st.info("3-Year rolling returns require at least 4 years of NAV history.")
+
+
+# ── TAB 2: ALL METRICS ────────────────────────────────────────────────────────
+with tab_metrics:
+    st.caption("All 31 quantitative metrics computed for this fund.")
+
+    SECTIONS = {
+        "📈 Performance": [
+            ("cagr_1y",        "1-Year CAGR",           "pct"),
+            ("cagr_3y",        "3-Year CAGR",           "pct"),
+            ("cagr_5y",        "5-Year CAGR",           "pct"),
+            ("cagr_inception", "Since Inception CAGR",  "pct"),
+        ],
+        "🌊 Volatility": [
+            ("annualized_volatility", "Annualized Volatility", "pct"),
+            ("downside_volatility",   "Downside Volatility",   "pct"),
+        ],
+        "⚠️ Risk": [
+            ("max_drawdown",      "Maximum Drawdown",       "pct"),
+            ("avg_drawdown",      "Average Drawdown",       "pct"),
+            ("drawdown_duration", "Max Drawdown Duration",  "days"),
+        ],
+        "⚖️ Risk-Adjusted": [
+            ("sharpe",  "Sharpe Ratio",  "ratio"),
+            ("sortino", "Sortino Ratio", "ratio"),
+            ("calmar",  "Calmar Ratio",  "ratio"),
+        ],
+        "🔁 Rolling Returns — 1 Year": [
+            ("avg_rolling_1y",    "Average 1Y Rolling Return",    "pct"),
+            ("median_rolling_1y", "Median 1Y Rolling Return",     "pct"),
+            ("std_rolling_1y",    "Std Dev 1Y Rolling Return",    "pct"),
+            ("best_rolling_1y",   "Best 1Y Rolling Return",       "pct"),
+            ("worst_rolling_1y",  "Worst 1Y Rolling Return",      "pct"),
+        ],
+        "🔁 Rolling Returns — 3 Year": [
+            ("avg_rolling_3y",    "Average 3Y Rolling Return",    "pct"),
+            ("median_rolling_3y", "Median 3Y Rolling Return",     "pct"),
+            ("std_rolling_3y",    "Std Dev 3Y Rolling Return",    "pct"),
+            ("best_rolling_3y",   "Best 3Y Rolling Return",       "pct"),
+            ("worst_rolling_3y",  "Worst 3Y Rolling Return",      "pct"),
+        ],
+        "📐 Distribution": [
+            ("skewness", "Skewness",         "ratio"),
+            ("kurtosis", "Excess Kurtosis",  "ratio"),
+        ],
+        "📅 Stability": [
+            ("positive_freq", "Positive Day Frequency", "pct"),
+            ("negative_freq", "Negative Day Frequency", "pct"),
+            ("win_rate",      "Monthly Win Rate",       "pct"),
+        ],
+        "🔗 Persistence": [
+            ("pct_positive_rolling_1y", "% Positive 1Y Rolling Periods", "pct"),
+            ("pct_positive_rolling_3y", "% Positive 3Y Rolling Periods", "pct"),
+            ("max_consec_positive",     "Max Consecutive Positive Days",  "int"),
+            ("max_consec_negative",     "Max Consecutive Negative Days",  "int"),
+        ],
+    }
+
+    def _fmt(val, kind):
+        if val is None or (isinstance(val, float) and np.isnan(val)):
+            return "N/A"
+        if kind == "pct":   return fmt_pct(val)
+        if kind == "ratio": return fmt_ratio(val)
+        if kind == "days":  return fmt_days(val)
+        if kind == "int":   return str(int(val))
+        return str(val)
+
+    for section_title, metric_list in SECTIONS.items():
+        with st.expander(section_title, expanded=True):
+            rows = [
+                {"Metric": label, "Value": _fmt(metrics.get(key), kind)}
+                for key, label, kind in metric_list
+            ]
+            sec_df = pd.DataFrame(rows)
+            st.dataframe(sec_df, use_container_width=True, hide_index=True)
+
+
+# ── TAB 3: DATA QUALITY ───────────────────────────────────────────────────────
+with tab_quality:
+    nav = metrics.get("nav")
+    report = build_quality_report(selected_name, nav)
+
+    q1, q2, q3, q4 = st.columns(4)
+    q1.metric("History",      f"{report.get('history_years', 0)} yrs")
+    q2.metric("Data Points",  f"{report.get('data_points', 0):,}")
+    q3.metric("Missing Data", f"{report.get('missing_pct', 0):.1f}%")
+    q4.metric("Start Date",   fmt_date(report.get("start_date") if report.get("start_date") else None))
+
+    if report.get("warnings"):
+        for w in report["warnings"]:
+            st.warning(w)
+
+    st.subheader("Metric Coverage")
+    st.caption("Shows which metrics can be computed given this fund's data history.")
+    coverage = report.get("coverage", {})
+    cov_rows = [
+        {
+            "Metric":    METRIC_LABELS.get(key, key),
+            "Available": "✅ Yes" if avail else "❌ No (insufficient history)",
+        }
+        for key, avail in coverage.items()
+    ]
+    cov_df = pd.DataFrame(cov_rows)
+    yes_count = sum(1 for r in cov_rows if "Yes" in r["Available"])
+    st.caption(f"{yes_count} of {len(cov_rows)} metrics available for this fund.")
+    st.dataframe(cov_df, use_container_width=True, hide_index=True)

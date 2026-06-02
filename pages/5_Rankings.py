@@ -1,0 +1,279 @@
+"""
+pages/5_Rankings.py
+====================
+Rankings — Category-wise Ranking Tables
+
+Shows all funds in a category ranked by each quantitative metric.
+Every ranking table is sortable and exportable to CSV.
+
+Organised into tabs:
+  1. Performance    — CAGR rankings
+  2. Risk-Adjusted  — Sharpe, Sortino, Calmar
+  3. Risk           — Drawdown, Volatility
+  4. Consistency    — Rolling returns
+  5. Stability      — Win rate, positive frequency
+"""
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+
+from data.fund_loader   import get_all_categorized_schemes, get_nav_history
+from analytics.engine   import compute_category_metrics, compute_category_quartiles
+from analytics.quartile import build_metrics_dataframe, get_rankings_for_metric
+from utils.constants    import CATEGORIES, APP_TITLE, APP_ICON, METRIC_LABELS
+from utils.formatters   import fmt_pct, fmt_ratio, fmt_days, style_quartile
+
+st.set_page_config(
+    page_title = "Rankings — MF Analytics",
+    page_icon  = "🏆",
+    layout     = "wide",
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SIDEBAR
+# ─────────────────────────────────────────────────────────────────────────────
+
+with st.sidebar:
+    st.title(f"{APP_ICON} {APP_TITLE}")
+    st.divider()
+
+    category = st.selectbox(
+        "📂 Category",
+        CATEGORIES,
+        index = CATEGORIES.index(st.session_state.get("selected_category", "Large Cap")),
+    )
+    st.session_state["selected_category"] = category
+
+    top_n = st.slider("Top N funds to show", 5, 20, 10, 1)
+
+    st.divider()
+    rf_pct = st.slider(
+        "Risk-Free Rate (%)", 4.0, 9.0,
+        st.session_state.get("rf_rate", 6.5), 0.1,
+    )
+    rf_rate = rf_pct / 100
+    st.session_state["rf_rate"] = rf_pct
+
+    st.divider()
+    if st.button("🔄 Refresh NAV Data", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HEADER
+# ─────────────────────────────────────────────────────────────────────────────
+
+st.title(f"🏆 Rankings — {category}")
+st.caption(
+    f"Funds ranked within **{category}** only. "
+    "Rankings are not comparable across categories."
+)
+st.divider()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LOAD FUND LIST
+# ─────────────────────────────────────────────────────────────────────────────
+
+with st.spinner("Loading fund list…"):
+    all_cat   = get_all_categorized_schemes()
+    fund_list = all_cat.get(category, [])
+
+if not fund_list:
+    st.warning("No funds found for this category.")
+    st.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ANALYTICS TRIGGER
+# ─────────────────────────────────────────────────────────────────────────────
+
+st.info(
+    f"Rankings require computing metrics for all **{len(fund_list)} funds** in {category}. "
+    f"First run takes ~{len(fund_list)*3//60 + 1}–{len(fund_list)*5//60 + 2} minutes. "
+    "Results are cached for 1 hour.",
+    icon="⏱️",
+)
+
+analytics_key = f"rankings_done_{category}"
+run_btn = st.button(
+    f"⚡ Compute Rankings for {category}  ({len(fund_list)} funds)",
+    type="primary", use_container_width=True,
+)
+
+if run_btn or st.session_state.get(analytics_key):
+
+    if not st.session_state.get(analytics_key):
+        nav_dict = {}
+        progress = st.progress(0, text="Loading NAVs…")
+        for i, fund in enumerate(fund_list):
+            progress.progress(
+                (i + 1) / len(fund_list),
+                text=f"Fetching: {fund['name'][:55]} ({i+1}/{len(fund_list)})",
+            )
+            nav_dict[fund["name"]] = get_nav_history(fund["code"])
+        progress.empty()
+
+        with st.spinner("Computing metrics for all funds…"):
+            fund_metrics = compute_category_metrics(nav_dict, rf_rate=rf_rate)
+            full_df      = compute_category_quartiles(fund_metrics)
+
+        st.session_state[f"full_df_{category}"]        = full_df
+        st.session_state[f"fund_metrics_{category}"]   = fund_metrics
+        st.session_state[analytics_key]                 = True
+        st.success(f"✅ Rankings ready for {len(fund_metrics)} funds!")
+
+    full_df      = st.session_state.get(f"full_df_{category}", pd.DataFrame())
+    fund_metrics = st.session_state.get(f"fund_metrics_{category}", {})
+
+    if full_df.empty:
+        st.warning("No data available for rankings.")
+        st.stop()
+
+    valid_n = sum(1 for m in fund_metrics.values() if m.get("is_valid"))
+    st.caption(f"Rankings computed from {valid_n} of {len(fund_metrics)} funds with sufficient data.")
+
+    # ── Helper ────────────────────────────────────────────────────────────────
+    def _fmt(val, kind):
+        if val is None or (isinstance(val, float) and np.isnan(float(val) if val is not None else float("nan"))):
+            return "N/A"
+        try:
+            v = float(val)
+            if kind == "pct":   return fmt_pct(v)
+            if kind == "ratio": return fmt_ratio(v)
+            if kind == "days":  return fmt_days(v)
+            if kind == "int":   return str(int(v))
+        except Exception:
+            return "N/A"
+        return str(val)
+
+    def _ranking_table(metric_key, label, kind, ascending=False):
+        """Render a ranking table for one metric."""
+        if metric_key not in full_df.columns:
+            st.caption(f"_{label} — insufficient data_")
+            return
+
+        col = pd.to_numeric(full_df[metric_key], errors="coerce").dropna()
+        if col.empty:
+            st.caption(f"_{label} — no valid values_")
+            return
+
+        sorted_df = full_df.sort_values(metric_key, ascending=ascending).head(top_n)
+        q_col = f"{metric_key}_quartile"
+
+        rows = []
+        for rank, (fund_name, row) in enumerate(sorted_df.iterrows(), start=1):
+            val = row.get(metric_key)
+            q   = row.get(q_col, "N/A") if q_col in sorted_df.columns else "N/A"
+            rows.append({
+                "Rank":     rank,
+                "Fund":     fund_name,
+                label:      _fmt(val, kind),
+                "Quartile": str(q),
+            })
+
+        df_out = pd.DataFrame(rows)
+        st.dataframe(
+            df_out.style.map(style_quartile, subset=["Quartile"]),
+            use_container_width=True,
+            hide_index=True,
+            height=min(450, 42 + 36 * len(df_out)),
+        )
+
+        csv = df_out.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            f"⬇️ Download {label} Ranking (CSV)",
+            data=csv,
+            file_name=f"{category.replace(' ','_')}_{metric_key}_ranking.csv",
+            mime="text/csv",
+            key=f"dl_{metric_key}",
+        )
+
+    # ── RANKING TABS ──────────────────────────────────────────────────────────
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📈 Performance",
+        "⚖️ Risk-Adjusted",
+        "⚠️ Risk",
+        "🔁 Consistency",
+        "📅 Stability",
+    ])
+
+    # ── Tab 1: Performance ────────────────────────────────────────────────────
+    with tab1:
+        st.subheader("Performance Rankings")
+        cols = st.columns(2, gap="large")
+        with cols[0]:
+            st.markdown("**Top — 1Y CAGR**")
+            _ranking_table("cagr_1y", "1Y CAGR", "pct", ascending=False)
+
+            st.markdown("**Top — 5Y CAGR**")
+            _ranking_table("cagr_5y", "5Y CAGR", "pct", ascending=False)
+
+        with cols[1]:
+            st.markdown("**Top — 3Y CAGR**")
+            _ranking_table("cagr_3y", "3Y CAGR", "pct", ascending=False)
+
+            st.markdown("**Top — Since Inception CAGR**")
+            _ranking_table("cagr_inception", "Inception CAGR", "pct", ascending=False)
+
+    # ── Tab 2: Risk-Adjusted ──────────────────────────────────────────────────
+    with tab2:
+        st.subheader("Risk-Adjusted Rankings")
+        cols = st.columns(3, gap="large")
+        with cols[0]:
+            st.markdown("**Top — Sharpe Ratio**")
+            _ranking_table("sharpe", "Sharpe", "ratio", ascending=False)
+        with cols[1]:
+            st.markdown("**Top — Sortino Ratio**")
+            _ranking_table("sortino", "Sortino", "ratio", ascending=False)
+        with cols[2]:
+            st.markdown("**Top — Calmar Ratio**")
+            _ranking_table("calmar", "Calmar", "ratio", ascending=False)
+
+    # ── Tab 3: Risk ───────────────────────────────────────────────────────────
+    with tab3:
+        st.subheader("Risk Rankings")
+        st.caption("Lower is better for all metrics in this section.")
+        cols = st.columns(2, gap="large")
+        with cols[0]:
+            st.markdown("**Lowest — Annualized Volatility**")
+            _ranking_table("annualized_volatility", "Ann. Volatility", "pct", ascending=True)
+
+            st.markdown("**Lowest — Max Drawdown**")
+            _ranking_table("max_drawdown", "Max Drawdown", "pct", ascending=False)
+        with cols[1]:
+            st.markdown("**Lowest — Downside Volatility**")
+            _ranking_table("downside_volatility", "Downside Vol", "pct", ascending=True)
+
+            st.markdown("**Lowest — Avg Drawdown**")
+            _ranking_table("avg_drawdown", "Avg Drawdown", "pct", ascending=False)
+
+    # ── Tab 4: Consistency ────────────────────────────────────────────────────
+    with tab4:
+        st.subheader("Consistency Rankings")
+        cols = st.columns(2, gap="large")
+        with cols[0]:
+            st.markdown("**Top — Avg 1Y Rolling Return**")
+            _ranking_table("avg_rolling_1y", "Avg 1Y Rolling", "pct", ascending=False)
+
+            st.markdown("**Best — Worst 1Y Rolling Return**")
+            _ranking_table("worst_rolling_1y", "Worst 1Y Rolling", "pct", ascending=False)
+        with cols[1]:
+            st.markdown("**Top — Avg 3Y Rolling Return**")
+            _ranking_table("avg_rolling_3y", "Avg 3Y Rolling", "pct", ascending=False)
+
+            st.markdown("**% of Positive 1Y Rolling Periods**")
+            _ranking_table("pct_positive_rolling_1y", "% Positive 1Y", "pct", ascending=False)
+
+    # ── Tab 5: Stability ──────────────────────────────────────────────────────
+    with tab5:
+        st.subheader("Stability Rankings")
+        cols = st.columns(3, gap="large")
+        with cols[0]:
+            st.markdown("**Top — Monthly Win Rate**")
+            _ranking_table("win_rate", "Win Rate", "pct", ascending=False)
+        with cols[1]:
+            st.markdown("**Top — Positive Day Frequency**")
+            _ranking_table("positive_freq", "Positive Freq", "pct", ascending=False)
+        with cols[2]:
+            st.markdown("**Top — % Positive 3Y Rolling**")
+            _ranking_table("pct_positive_rolling_3y", "% Positive 3Y", "pct", ascending=False)
