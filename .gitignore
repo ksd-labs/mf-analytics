@@ -1,0 +1,53 @@
+# ─── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ─── Virtual Environments ─────────────────────────────────────────────────────
+venv/
+env/
+.venv/
+.env/
+ENV/
+
+# ─── Conda ────────────────────────────────────────────────────────────────────
+.conda/
+
+# ─── Streamlit ────────────────────────────────────────────────────────────────
+.streamlit/secrets.toml
+
+# ─── Jupyter ──────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ─── OS files ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── IDEs ─────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ─── Logs & temp ──────────────────────────────────────────────────────────────
+*.log
+*.tmp
+*.bak
+.cache/
+
+# ─── Data / exports ───────────────────────────────────────────────────────────
+# Uncomment if you don't want to commit any downloaded data files
+# data/cache/
+# exports/
+
+# ─── Environment variables ────────────────────────────────────────────────────
+.env
+.env.local
