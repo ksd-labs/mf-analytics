@@ -55,6 +55,15 @@ with st.sidebar:
     rf_rate = rf_pct / 100
     st.session_state["rf_rate"] = rf_pct
 
+    plan_type = st.radio(
+        "Plan Universe",
+        options    = ["Direct", "Regular"],
+        index      = 0 if st.session_state.get("plan_type", "Direct") == "Direct" else 1,
+        horizontal = True,
+        help       = "Direct: no distributor commission. Regular: distributor-advised.",
+    )
+    st.session_state["plan_type"] = plan_type
+
     st.divider()
     if st.button("🔄 Refresh NAV Data", use_container_width=True):
         st.cache_data.clear()
@@ -66,7 +75,7 @@ with st.sidebar:
 
 st.title(f"🏆 Rankings — {category}")
 st.caption(
-    f"Funds ranked within **{category}** only. "
+    f"**{plan_type} plans only.** Funds ranked within **{category}** only. "
     "Rankings are not comparable across categories."
 )
 st.divider()
@@ -75,8 +84,10 @@ st.divider()
 # LOAD FUND LIST
 # ─────────────────────────────────────────────────────────────────────────────
 
+plan_type = st.session_state.get("plan_type", "Direct")
+
 with st.spinner("Loading fund list…"):
-    all_cat   = get_all_categorized_schemes()
+    all_cat   = get_all_categorized_schemes(plan_type=plan_type)
     fund_list = all_cat.get(category, [])
 
 if not fund_list:

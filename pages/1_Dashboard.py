@@ -46,6 +46,15 @@ with st.sidebar:
     )
     st.session_state["rf_rate"] = rf_pct
 
+    plan_type = st.radio(
+        "Plan Universe",
+        options    = ["Direct", "Regular"],
+        index      = 0 if st.session_state.get("plan_type", "Direct") == "Direct" else 1,
+        horizontal = True,
+        help       = "Direct: no distributor commission. Regular: distributor-advised.",
+    )
+    st.session_state["plan_type"] = plan_type
+
     st.divider()
     if st.button("🔄 Refresh NAV Data", use_container_width=True):
         st.cache_data.clear()
@@ -65,6 +74,8 @@ st.divider()
 # ─────────────────────────────────────────────────────────────────────────────
 # LOAD DATA
 # ─────────────────────────────────────────────────────────────────────────────
+
+plan_type = st.session_state.get("plan_type", "Direct")
 
 with st.spinner("Loading scheme registry from AMFI…"):
     all_schemes = get_all_schemes()
@@ -87,7 +98,7 @@ k1, k2, k3, k4 = st.columns(4)
 k1.metric("Total AMFI Schemes",        f"{len(all_schemes):,}")
 k2.metric("Growth Funds Tracked",      f"{total_growth:,}")
 k3.metric("Categories Covered",        f"{len(CATEGORIES)}")
-k4.metric("Risk-Free Rate (Active)",   f"{rf_pct:.1f}%")
+k4.metric(f"{plan_type} Plans Only",   f"{sum(counts.values()):,} Growth Funds")
 
 st.divider()
 

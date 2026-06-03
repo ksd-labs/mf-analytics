@@ -178,6 +178,42 @@ def filter_regular_plans(schemes: Dict[str, str]) -> Dict[str, str]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# UNIFIED PLAN TYPE FILTER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def filter_by_plan_type(
+    all_schemes: Dict[str, str],
+    plan_type: str = "Direct",
+) -> Dict[str, str]:
+    """
+    Single entry point for plan-type filtering.
+
+    Pipeline:
+        1. filter_preferred_plans()  — remove Dividend/IDCW/ETF/FoF
+        2. filter_direct_plans()     — if plan_type == "Direct"
+           OR filter_regular_plans() — if plan_type == "Regular"
+
+    Args:
+        all_schemes: Raw {code: name} dict from mftool (all 40,000+ schemes)
+        plan_type:   "Direct" or "Regular" (from sidebar session state)
+
+    Returns:
+        Filtered {code: name} dict for the chosen universe.
+    """
+    # Step 1: remove Dividend, IDCW, ETF, FoF regardless of plan type
+    growth_only = filter_preferred_plans(all_schemes)
+
+    # Step 2: split by plan type
+    if plan_type == "Direct":
+        return filter_direct_plans(growth_only)
+    elif plan_type == "Regular":
+        return filter_regular_plans(growth_only)
+    else:
+        # Fallback — should not happen, but return all growth plans
+        return growth_only
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # NAME CLEANING
 # ─────────────────────────────────────────────────────────────────────────────
 

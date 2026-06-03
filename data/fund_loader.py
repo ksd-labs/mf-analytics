@@ -312,25 +312,29 @@ def get_nav_history(scheme_code: str) -> Optional[pd.DataFrame]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_all_categorized_schemes() -> Dict[str, List[Dict]]:
+def get_all_categorized_schemes(plan_type: str = "Direct") -> Dict[str, List[Dict]]:
     """
     Load all schemes and group by category in one cached call.
-    More efficient than calling get_schemes_for_category() 12 times.
+
+    Args:
+        plan_type: "Direct" or "Regular" — filters to one universe only.
+                   Cached separately per plan_type so switching is instant.
 
     Returns:
         {category_name: [{code, name}, ...]} for all 12 categories.
     """
-    from data.category_mapper import get_category_for_scheme, filter_preferred_plans
+    from data.category_mapper import get_category_for_scheme, filter_by_plan_type
     from utils.constants import CATEGORIES
 
     all_schemes = get_all_schemes()
     if not all_schemes:
         return {cat: [] for cat in CATEGORIES}
 
-    preferred = filter_preferred_plans(all_schemes)
+    # filter_by_plan_type handles both the growth filter AND the direct/regular split
+    filtered = filter_by_plan_type(all_schemes, plan_type=plan_type)
     result: Dict[str, List[Dict]] = {cat: [] for cat in CATEGORIES}
 
-    for code, name in preferred.items():
+    for code, name in filtered.items():
         category = get_category_for_scheme(name)
         if category and category in result:
             result[category].append({"code": code, "name": name})
@@ -342,11 +346,15 @@ def get_all_categorized_schemes() -> Dict[str, List[Dict]]:
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_schemes_for_category(category: str) -> List[Dict]:
+def get_schemes_for_category(category: str, plan_type: str = "Direct") -> List[Dict]:
     """
     Return [{code, name}] for all Growth-plan funds in a single category.
+
+    Args:
+        category:  One of the 12 category strings.
+        plan_type: "Direct" or "Regular".
     """
-    all_cat = get_all_categorized_schemes()
+    all_cat = get_all_categorized_schemes(plan_type=plan_type)
     return all_cat.get(category, [])
 
 

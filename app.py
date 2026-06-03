@@ -52,9 +52,19 @@ with st.sidebar:
     )
     st.session_state["rf_rate"] = rf_pct
 
+    plan_type = st.radio(
+        "Plan Universe",
+        options    = ["Direct", "Regular"],
+        index      = 0 if st.session_state.get("plan_type", "Direct") == "Direct" else 1,
+        horizontal = True,
+        help       = "Direct: no distributor commission. Regular: distributor-advised. Never mix both.",
+    )
+    st.session_state["plan_type"] = plan_type
+
     st.divider()
 
-    if st.button("🔄 Refresh NAV Data", use_container_width=True,
+    if st.button("🔄 Refresh NAV Data"
+, use_container_width=True,
                  help="Clears the 24-hour NAV cache and re-fetches all data."):
         st.cache_data.clear()
         st.success("Cache cleared — data will reload on next action.")
@@ -79,6 +89,8 @@ st.divider()
 # ─────────────────────────────────────────────────────────────────────────────
 # LOAD SCHEME DATA
 # ─────────────────────────────────────────────────────────────────────────────
+plan_type = st.session_state.get("plan_type", "Direct")
+
 with st.spinner("Loading scheme registry…"):
     all_schemes = get_all_schemes()
 

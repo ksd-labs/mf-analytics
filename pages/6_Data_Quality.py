@@ -45,6 +45,15 @@ with st.sidebar:
     )
     st.session_state["selected_category"] = category
 
+    plan_type = st.radio(
+        "Plan Universe",
+        options    = ["Direct", "Regular"],
+        index      = 0 if st.session_state.get("plan_type", "Direct") == "Direct" else 1,
+        horizontal = True,
+        help       = "Direct: no distributor commission. Regular: distributor-advised.",
+    )
+    st.session_state["plan_type"] = plan_type
+
     st.divider()
     if st.button("🔄 Refresh NAV Data", use_container_width=True):
         st.cache_data.clear()
@@ -78,15 +87,17 @@ st.divider()
 # LOAD FUND LIST
 # ─────────────────────────────────────────────────────────────────────────────
 
+plan_type = st.session_state.get("plan_type", "Direct")
+
 with st.spinner(f"Loading {category} fund list…"):
-    all_cat   = get_all_categorized_schemes()
+    all_cat   = get_all_categorized_schemes(plan_type=plan_type)
     fund_list = all_cat.get(category, [])
 
 if not fund_list:
     st.warning("No funds found for this category.")
     st.stop()
 
-st.subheader(f"📂 {category} — {len(fund_list)} Funds")
+st.subheader(f"📂 {category} — {len(fund_list)} {plan_type} Funds")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LOAD NAV SUMMARIES (lighter than full analytics)

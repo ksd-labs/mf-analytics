@@ -51,8 +51,10 @@ with st.sidebar:
     )
     st.session_state["selected_category"] = category
 
+    plan_type = st.session_state.get("plan_type", "Direct")
+
     with st.spinner("Loading fund list…"):
-        all_cat   = get_all_categorized_schemes()
+        all_cat   = get_all_categorized_schemes(plan_type=plan_type)
         fund_list = all_cat.get(category, [])
 
     if not fund_list:
@@ -78,6 +80,15 @@ with st.sidebar:
     rf_rate = rf_pct / 100
     st.session_state["rf_rate"] = rf_pct
 
+    plan_type = st.radio(
+        "Plan Universe",
+        options    = ["Direct", "Regular"],
+        index      = 0 if st.session_state.get("plan_type", "Direct") == "Direct" else 1,
+        horizontal = True,
+        help       = "Direct: no distributor commission. Regular: distributor-advised.",
+    )
+    st.session_state["plan_type"] = plan_type
+
     st.divider()
     if st.button("🔄 Refresh NAV Data", use_container_width=True):
         st.cache_data.clear()
@@ -93,7 +104,7 @@ if len(selected_funds) < 2:
     st.info("👈 Select at least **2 funds** from the sidebar to begin comparison.")
     st.stop()
 
-st.subheader(f"Comparing {len(selected_funds)} funds — {category}")
+st.subheader(f"Comparing {len(selected_funds)} {plan_type} funds — {category}")
 st.caption(
     "All charts use a common date range where all selected funds have NAV data. "
     "Newer funds may have a shorter common period."

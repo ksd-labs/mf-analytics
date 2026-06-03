@@ -154,6 +154,28 @@ INDEX_EXCLUSIONS: List[str] = [
 # PLAN / OPTION FILTERS
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────────────────
+# PLAN TYPE SELECTION
+# ─────────────────────────────────────────────────────────────────────────────
+# SEBI mandated Direct/Regular split in 2013. Direct plans have no distributor
+# commission → lower expense ratio → higher returns. Comparing Direct vs
+# Regular of the same fund distorts every metric — always analyse within
+# one universe (Direct-only or Regular-only).
+
+PLAN_TYPES: List[str] = ["Direct", "Regular"]
+
+# Default plan type shown on app startup
+DEFAULT_PLAN_TYPE: str = "Direct"
+
+# Keywords that identify a Direct plan in the scheme name
+DIRECT_KEYWORDS: List[str] = ["direct"]
+
+# Keywords that identify a Regular plan explicitly
+# Note: pre-2013 schemes have neither keyword — treated as Regular
+REGULAR_KEYWORDS: List[str] = ["regular"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+
 # We only want Growth option schemes (not Dividend / IDCW).
 # A scheme name MUST contain at least one of these to pass.
 PREFERRED_OPTIONS: List[str] = [
