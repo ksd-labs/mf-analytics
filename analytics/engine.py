@@ -225,28 +225,31 @@ def compute_fund_metrics(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def compute_category_metrics(
-    fund_nav_dict: Dict[str, Optional[pd.DataFrame]],
-    rf_rate: float = DEFAULT_RISK_FREE_RATE,
+    fund_nav_dict:    Dict[str, Optional[pd.DataFrame]],
+    rf_rate:          float = DEFAULT_RISK_FREE_RATE,
     progress_bar=None,
+    benchmark_nav_df: Optional[pd.DataFrame] = None,
+    benchmark_name:   str = "",
 ) -> Dict[str, Dict]:
     """
     Compute metrics for all funds in a category.
 
+    The benchmark NAV is loaded ONCE here at category level and reused
+    for every fund — this is the correct architecture. Individual funds
+    should never each reload the same benchmark independently.
+
     Args:
-        fund_nav_dict: {fund_name: nav_df_or_None, ...}
-                       fund_name is used as the display label and dict key.
-        rf_rate:       Annual risk-free rate for ratio calculations.
-        progress_bar:  Optional Streamlit progress bar object.
-                       Will be updated as each fund is processed.
+        fund_nav_dict:    {fund_name: nav_df_or_None, ...}
+        rf_rate:          Annual risk-free rate for ratio calculations.
+        progress_bar:     Optional Streamlit progress bar object.
+        benchmark_nav_df: Optional benchmark NAV DataFrame. When provided,
+                          alpha metrics (Jensen's alpha, capture ratio, etc.)
+                          are computed for every fund automatically.
+        benchmark_name:   Display name of the benchmark (e.g. "Nifty 100 TRI").
 
     Returns:
         {fund_name: metrics_dict, ...}
         where metrics_dict is the output of compute_fund_metrics().
-
-    Usage:
-        nav_data = load_navs_for_funds(fund_list)
-        all_metrics = compute_category_metrics(nav_data)
-        full_table = compute_category_quartiles(all_metrics)
     """
     results: Dict[str, Dict] = {}
     total = len(fund_nav_dict)
@@ -263,7 +266,13 @@ def compute_category_metrics(
                 pass
 
         try:
-            metrics = compute_fund_metrics(nav_df, rf_rate=rf_rate, fund_name=fund_name)
+            metrics = compute_fund_metrics(
+                nav_df,
+                rf_rate          = rf_rate,
+                fund_name        = fund_name,
+                benchmark_nav_df = benchmark_nav_df,   # same benchmark for every fund
+                benchmark_name   = benchmark_name,
+            )
             results[fund_name] = metrics
         except Exception as e:
             logger.error(f"engine: compute_fund_metrics failed for '{fund_name}': {e}")
@@ -321,28 +330,43 @@ def get_cached_fund_metrics(
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_cached_category_metrics(
-    category: str,
-    rf_rate: float = DEFAULT_RISK_FREE_RATE,
+    category:  str,
+    rf_rate:   float = DEFAULT_RISK_FREE_RATE,
+    plan_type: str = "Direct",
 ) -> Dict[str, Dict]:
     """
     Cached wrapper for computing metrics for ALL funds in a category.
-    This is the most expensive operation — can take 30–120 seconds for
-    large categories (Mid Cap has 25+ funds × ~2s each).
 
-    Results are cached for 1 hour so subsequent page navigations are instant.
+    Automatically loads the benchmark for the category and passes it
+    to every fund computation — alpha metrics are included in every result.
+
+    Benchmark is loaded ONCE per category call (not once per fund),
+    making category-wide alpha computation efficient.
 
     Args:
-        category: Category name (e.g. 'Large Cap')
-        rf_rate:  Annual risk-free rate
+        category:  Category name (e.g. "Large Cap")
+        rf_rate:   Annual risk-free rate
+        plan_type: "Direct" or "Regular"
 
     Returns:
-        {fund_name: metrics_dict} for all funds in the category.
+        {fund_name: metrics_dict} for all funds — including alpha metrics.
     """
-    from data.fund_loader import get_schemes_for_category, load_navs_for_funds
+    from data.fund_loader      import get_schemes_for_category, load_navs_for_funds
+    from data.benchmark_loader import get_benchmark_nav, get_benchmark_info
 
-    fund_list = get_schemes_for_category(category)
+    fund_list = get_schemes_for_category(category, plan_type=plan_type)
     if not fund_list:
         return {}
+
+    # Load benchmark ONCE for the whole category
+    bm_info   = get_benchmark_info(category)
+    bm_nav_df = get_benchmark_nav(category) if bm_info["available"] else None
+    bm_name   = bm_info["display_name"]
+
+    if bm_nav_df is not None:
+        logger.info(f"Benchmark loaded for {category}: {bm_name}")
+    else:
+        logger.warning(f"No benchmark available for {category} — alpha metrics will be skipped")
 
     # Load NAVs (each individual NAV is cached by get_nav_history)
     nav_dict = {
@@ -350,7 +374,13 @@ def get_cached_category_metrics(
         for fund in fund_list
     }
 
-    return compute_category_metrics(nav_dict, rf_rate=rf_rate)
+    # Pass benchmark to every fund — alpha computed automatically
+    return compute_category_metrics(
+        nav_dict,
+        rf_rate          = rf_rate,
+        benchmark_nav_df = bm_nav_df,
+        benchmark_name   = bm_name,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

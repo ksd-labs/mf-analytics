@@ -155,10 +155,19 @@ if run_analytics or st.session_state.get(f"analytics_done_{category}"):
         progress.empty()
 
         # ── Compute metrics ───────────────────────────────────────────────────
-        with st.spinner("Computing quantitative metrics…"):
-            fund_metrics = compute_category_metrics(nav_dict, rf_rate=rf_rate)
-            full_df      = compute_category_quartiles(fund_metrics)
-            metrics_df   = build_metrics_dataframe(fund_metrics)
+        with st.spinner("Computing quantitative metrics + alpha…"):
+            from data.benchmark_loader import get_benchmark_nav, get_benchmark_info
+            bm_info   = get_benchmark_info(category)
+            bm_nav_df = get_benchmark_nav(category) if bm_info["available"] else None
+
+            fund_metrics = compute_category_metrics(
+                nav_dict,
+                rf_rate          = rf_rate,
+                benchmark_nav_df = bm_nav_df,
+                benchmark_name   = bm_info["display_name"],
+            )
+            full_df    = compute_category_quartiles(fund_metrics)
+            metrics_df = build_metrics_dataframe(fund_metrics)
 
         st.session_state[f"fund_metrics_{category}"] = fund_metrics
         st.session_state[f"full_df_{category}"]      = full_df

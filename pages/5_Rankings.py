@@ -126,9 +126,18 @@ if run_btn or st.session_state.get(analytics_key):
             nav_dict[fund["name"]] = get_nav_history(fund["code"])
         progress.empty()
 
-        with st.spinner("Computing metrics for all funds…"):
-            fund_metrics = compute_category_metrics(nav_dict, rf_rate=rf_rate)
-            full_df      = compute_category_quartiles(fund_metrics)
+        with st.spinner("Computing metrics + alpha for all funds…"):
+            from data.benchmark_loader import get_benchmark_nav, get_benchmark_info
+            bm_info   = get_benchmark_info(category)
+            bm_nav_df = get_benchmark_nav(category) if bm_info["available"] else None
+
+            fund_metrics = compute_category_metrics(
+                nav_dict,
+                rf_rate          = rf_rate,
+                benchmark_nav_df = bm_nav_df,
+                benchmark_name   = bm_info["display_name"],
+            )
+            full_df = compute_category_quartiles(fund_metrics)
 
         st.session_state[f"full_df_{category}"]        = full_df
         st.session_state[f"fund_metrics_{category}"]   = fund_metrics
@@ -312,8 +321,10 @@ if run_btn or st.session_state.get(analytics_key):
 
             if not has_alpha:
                 st.info(
-                    "Alpha metrics not yet computed. Re-run analytics with benchmark data. "
-                    "Go to **Fund Analytics** page and click the Alpha tab for any fund to trigger benchmark loading."
+                    "Alpha metrics not available — the benchmark index fund for this "
+                    "category may not have been found. Check internet connection and "
+                    "re-run rankings.",
+                    icon="ℹ️",
                 )
             else:
                 st.plotly_chart(
