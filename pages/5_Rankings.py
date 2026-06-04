@@ -18,7 +18,9 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-from data.fund_loader   import get_all_categorized_schemes, get_nav_history
+from data.fund_loader       import get_all_categorized_schemes, get_nav_history
+from data.benchmark_loader  import get_benchmark_nav, get_benchmark_info
+from visualizations.alpha_charts import plot_capture_scatter
 from analytics.engine   import compute_category_metrics, compute_category_quartiles
 from analytics.quartile import build_metrics_dataframe, get_rankings_for_metric
 from utils.constants    import CATEGORIES, APP_TITLE, APP_ICON, METRIC_LABELS
@@ -200,12 +202,13 @@ if run_btn or st.session_state.get(analytics_key):
         )
 
     # ── RANKING TABS ──────────────────────────────────────────────────────────
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📈 Performance",
         "⚖️ Risk-Adjusted",
         "⚠️ Risk",
         "🔁 Consistency",
         "📅 Stability",
+        "⚡ Alpha",
     ])
 
     # ── Tab 1: Performance ────────────────────────────────────────────────────
@@ -288,3 +291,44 @@ if run_btn or st.session_state.get(analytics_key):
         with cols[2]:
             st.markdown("**Top — % Positive 3Y Rolling**")
             _ranking_table("pct_positive_rolling_3y", "% Positive 3Y", "pct", ascending=False)
+
+    # ── Tab 6: Alpha ──────────────────────────────────────────────────────────────
+    with tab6:
+        bm_info = get_benchmark_info(category)
+        st.subheader("⚡ Alpha Rankings")
+        st.info(
+            f"**Benchmark:** {bm_info['display_name']}  |  "
+            f"**Proxy:** {bm_info['scheme_name'][:60]}",
+            icon="📊",
+        )
+
+        if not bm_info["available"]:
+            st.warning("No benchmark found for this category — alpha rankings unavailable.")
+        elif not st.session_state.get(analytics_key):
+            st.info("Run full analytics first to see alpha rankings.")
+        else:
+            # Check if alpha metrics are present in full_df
+            has_alpha = "jensens_alpha" in full_df.columns and full_df["jensens_alpha"].notna().any()
+
+            if not has_alpha:
+                st.info(
+                    "Alpha metrics not yet computed. Re-run analytics with benchmark data. "
+                    "Go to **Fund Analytics** page and click the Alpha tab for any fund to trigger benchmark loading."
+                )
+            else:
+                st.plotly_chart(
+                    plot_capture_scatter(full_df, category),
+                    use_container_width=True,
+                )
+                st.divider()
+                cols_alpha = st.columns(2, gap="large")
+                with cols_alpha[0]:
+                    st.markdown("**Top — Jensen's Alpha**")
+                    _ranking_table("jensens_alpha", "Jensen's Alpha", "pct", ascending=False)
+                    st.markdown("**Top — Information Ratio**")
+                    _ranking_table("information_ratio", "Info Ratio", "ratio", ascending=False)
+                with cols_alpha[1]:
+                    st.markdown("**Top — Capture Ratio**")
+                    _ranking_table("capture_ratio", "Capture Ratio", "ratio", ascending=False)
+                    st.markdown("**Lowest — Down-Capture**")
+                    _ranking_table("down_capture", "Down-Capture %", "num", ascending=True)

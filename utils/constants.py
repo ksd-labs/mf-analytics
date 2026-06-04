@@ -289,6 +289,7 @@ LOWER_IS_BETTER: List[str] = [
     "std_rolling_3y",
     "worst_rolling_1y",
     "worst_rolling_3y",
+    "down_capture",      # lower down-capture = better downside protection
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -338,4 +339,15 @@ METRIC_LABELS: Dict[str, str] = {
     "pct_positive_rolling_3y": "% Positive 3Y Rolling Periods",
     "max_consec_positive":     "Max Consecutive Positive Days",
     "max_consec_negative":     "Max Consecutive Negative Days",
+    # ── Alpha Generation ──────────────────────────────────────────────────────
+    "excess_return":     "Excess Return (Ann.)",
+    "beta":              "Beta",
+    "r_squared":         "R-Squared",
+    "tracking_error":    "Tracking Error",
+    "information_ratio": "Information Ratio",
+    "jensens_alpha":     "Jensen's Alpha (Ann.)",
+    "alpha_tstat":       "Alpha t-Statistic",
+    "up_capture":        "Up-Capture Ratio (%)",
+    "down_capture":      "Down-Capture Ratio (%)",
+    "capture_ratio":     "Capture Ratio",
 }

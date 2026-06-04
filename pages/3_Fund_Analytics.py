@@ -16,7 +16,11 @@ import pandas as pd
 import numpy as np
 
 from data.fund_loader      import get_nav_history, get_all_categorized_schemes
+from data.benchmark_loader import get_benchmark_nav, get_benchmark_info
 from analytics.engine      import compute_fund_metrics
+from visualizations.alpha_charts import (
+    plot_fund_vs_benchmark, plot_rolling_alpha,
+)
 from visualizations        import (
     plot_single_nav,
     plot_drawdown,
@@ -173,8 +177,9 @@ st.divider()
 # TABS
 # ─────────────────────────────────────────────────────────────────────────────
 
-tab_charts, tab_metrics, tab_quality = st.tabs([
+tab_charts, tab_alpha, tab_metrics, tab_quality = st.tabs([
     "📈 Charts",
+    "⚡ Alpha Analytics",
     "📊 All Metrics",
     "🔬 Data Quality",
 ])
@@ -223,6 +228,114 @@ with tab_charts:
         )
     else:
         st.info("3-Year rolling returns require at least 4 years of NAV history.")
+
+
+# ── TAB ALPHA: ALPHA ANALYTICS ───────────────────────────────────────────────
+with tab_alpha:
+    st.subheader("⚡ Alpha Analytics")
+
+    bm_info = get_benchmark_info(category)
+    st.info(
+        f"**Benchmark:** {bm_info['display_name']}  |  "
+        f"**Proxy used:** {bm_info['scheme_name'][:70]}  |  "
+        f"**Available:** {'✅' if bm_info['available'] else '❌ Not found'}",
+        icon="📊",
+    )
+
+    if not bm_info["available"]:
+        st.warning(
+            "No benchmark index fund found for this category. "
+            "Alpha metrics require a benchmark. "
+            "Check your internet connection and try refreshing."
+        )
+    else:
+        # Load benchmark and compute alpha if not already done
+        alpha_key = f"alpha_{selected_code}_{rf_pct}_{category}"
+        if alpha_key not in st.session_state:
+            with st.spinner("Loading benchmark NAV and computing alpha metrics…"):
+                bm_nav_df = get_benchmark_nav(category)
+                from analytics.engine import compute_fund_metrics
+                from data.fund_loader import get_nav_history as _gnav
+                nav_df_fresh = _gnav(selected_code)
+                full_metrics = compute_fund_metrics(
+                    nav_df_fresh, rf_rate=rf_rate,
+                    fund_name=selected_name,
+                    benchmark_nav_df=bm_nav_df,
+                    benchmark_name=bm_info["display_name"],
+                )
+            st.session_state[alpha_key] = full_metrics
+        else:
+            full_metrics = st.session_state[alpha_key]
+
+        # ── Alpha KPI cards ───────────────────────────────────────────────────
+        a1, a2, a3, a4, a5 = st.columns(5)
+        def _akpi(col, label, val, fmt="ratio"):
+            if val is None or (isinstance(val, float) and np.isnan(val)):
+                col.metric(label, "N/A"); return
+            col.metric(label, f"{val:.3f}" if fmt == "ratio" else f"{val*100:.2f}%")
+
+        _akpi(a1, "Jensen's Alpha",    full_metrics.get("jensens_alpha"),    "pct")
+        _akpi(a2, "Alpha t-Stat",      full_metrics.get("alpha_tstat"),      "ratio")
+        _akpi(a3, "Information Ratio", full_metrics.get("information_ratio"),"ratio")
+        _akpi(a4, "Capture Ratio",     full_metrics.get("capture_ratio"),    "ratio")
+        _akpi(a5, "Beta",              full_metrics.get("beta"),             "ratio")
+
+        st.divider()
+
+        # ── Charts ────────────────────────────────────────────────────────────
+        bm_nav = full_metrics.get("_benchmark_nav")
+        fund_nav_for_alpha = full_metrics.get("nav")
+
+        if fund_nav_for_alpha is not None and bm_nav is not None:
+            st.plotly_chart(
+                plot_fund_vs_benchmark(
+                    fund_nav_for_alpha, bm_nav,
+                    selected_name, bm_info["display_name"]
+                ),
+                use_container_width=True,
+            )
+
+        roll_alpha = full_metrics.get("_rolling_alpha")
+        if roll_alpha is not None:
+            st.plotly_chart(
+                plot_rolling_alpha({selected_name: roll_alpha}, "1-Year"),
+                use_container_width=True,
+            )
+        else:
+            st.info("Rolling alpha requires 2+ years of overlapping fund and benchmark history.")
+
+        # ── Alpha metrics table ───────────────────────────────────────────────
+        st.subheader("All Alpha Metrics")
+        ALPHA_METRICS = [
+            ("excess_return",    "Excess Return (Annualized)",  "pct"),
+            ("beta",             "Beta",                         "ratio"),
+            ("r_squared",        "R-Squared",                   "ratio"),
+            ("tracking_error",   "Tracking Error (Annualized)", "pct"),
+            ("information_ratio","Information Ratio",           "ratio"),
+            ("jensens_alpha",    "Jensen's Alpha (Annualized)","pct"),
+            ("alpha_tstat",      "Alpha t-Statistic",           "ratio"),
+            ("up_capture",       "Up-Capture Ratio",            "num"),
+            ("down_capture",     "Down-Capture Ratio",          "num"),
+            ("capture_ratio",    "Capture Ratio",               "ratio"),
+        ]
+        alpha_rows = []
+        for key, label, kind in ALPHA_METRICS:
+            val = full_metrics.get(key)
+            if val is None or (isinstance(val, float) and np.isnan(val)):
+                disp = "N/A"
+            elif kind == "pct":   disp = fmt_pct(val)
+            elif kind == "ratio": disp = fmt_ratio(val)
+            else:                 disp = f"{val:.2f}%"
+            alpha_rows.append({"Metric": label, "Value": disp})
+
+        st.dataframe(pd.DataFrame(alpha_rows), use_container_width=True, hide_index=True)
+
+        sig = full_metrics.get("alpha_tstat")
+        if sig is not None:
+            if abs(sig) >= 2.0:
+                st.success(f"✅ Alpha is **statistically significant** (|t| = {sig:.2f} ≥ 2.0) — manager skill is likely real.")
+            else:
+                st.warning(f"⚠️ Alpha is **not statistically significant** (|t| = {sig:.2f} < 2.0) — performance may be noise.")
 
 
 # ── TAB 2: ALL METRICS ────────────────────────────────────────────────────────

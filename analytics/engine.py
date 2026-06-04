@@ -48,6 +48,7 @@ from analytics.consistency    import calc_all_consistency
 from analytics.distribution   import calc_all_distribution
 from analytics.stability      import calc_all_stability
 from analytics.persistence    import calc_all_persistence
+from analytics.alpha          import calc_all_alpha
 from analytics.quartile       import build_full_quartile_table
 from utils.constants          import DEFAULT_RISK_FREE_RATE, MAR
 from utils.validators         import check_nav_series
@@ -63,6 +64,8 @@ def compute_fund_metrics(
     nav_df: Optional[pd.DataFrame],
     rf_rate: float = DEFAULT_RISK_FREE_RATE,
     fund_name: str = "",
+    benchmark_nav_df: Optional[pd.DataFrame] = None,
+    benchmark_name: str = "",
 ) -> Dict:
     """
     Compute all quantitative metrics for a single mutual fund.
@@ -108,6 +111,10 @@ def compute_fund_metrics(
     # Add all scalar metrics as None
     for key in _ALL_METRIC_KEYS:
         empty_result[key] = None
+    # Alpha metric fields
+    empty_result["_rolling_alpha"]   = None
+    empty_result["_benchmark_nav"]   = None
+    empty_result["_benchmark_name"]  = ""
 
     # ── Step 1: Process NAV ───────────────────────────────────────────────────
     if nav_df is None:
@@ -188,6 +195,27 @@ def compute_fund_metrics(
         rolling_3y=result.get("_series_3y"),
     )
     result.update(pers)
+
+    # ── Step 11: Alpha (Benchmark-Relative) — only if benchmark provided ──────
+    result["_benchmark_nav"]  = None
+    result["_benchmark_name"] = benchmark_name
+
+    if benchmark_nav_df is not None:
+        from data.nav_processor import align_nav_series
+
+        benchmark_nav = process_nav(benchmark_nav_df)
+        if benchmark_nav is not None and nav is not None:
+            aligned = align_nav_series({"fund": nav, "benchmark": benchmark_nav})
+            if len(aligned) == 2 and aligned.get("fund") is not None:
+                b_aligned   = aligned["benchmark"]
+                f_aligned   = aligned["fund"]
+                b_returns   = compute_daily_returns(b_aligned)
+                f_returns_b = compute_daily_returns(f_aligned)
+
+                alpha_metrics = calc_all_alpha(f_returns_b, b_returns, rf_rate)
+                result["_rolling_alpha"]  = alpha_metrics.pop("_rolling_alpha", None)
+                result["_benchmark_nav"]  = benchmark_nav
+                result.update(alpha_metrics)
 
     return result
 
@@ -350,4 +378,8 @@ _ALL_METRIC_KEYS: List[str] = [
     # Persistence
     "pct_positive_rolling_1y", "pct_positive_rolling_3y",
     "max_consec_positive", "max_consec_negative",
+    # Alpha Generation
+    "excess_return", "beta", "r_squared", "tracking_error",
+    "information_ratio", "jensens_alpha", "alpha_tstat",
+    "up_capture", "down_capture", "capture_ratio",
 ]

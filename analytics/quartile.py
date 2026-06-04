@@ -134,6 +134,10 @@ QUARTILE_METRICS: List[str] = [
     "skewness", "kurtosis",
     "positive_freq", "negative_freq", "win_rate",
     "pct_positive_rolling_1y", "pct_positive_rolling_3y",
+    # Alpha Generation
+    "excess_return", "beta", "r_squared", "tracking_error",
+    "information_ratio", "jensens_alpha", "alpha_tstat",
+    "up_capture", "down_capture", "capture_ratio",
 ]
 
 
