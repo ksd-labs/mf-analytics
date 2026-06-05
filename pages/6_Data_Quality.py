@@ -21,6 +21,7 @@ import numpy as np
 from data.fund_loader   import get_all_categorized_schemes, get_nav_history
 from data.nav_processor import process_nav, get_series_summary
 from utils.constants    import CATEGORIES, APP_TITLE, APP_ICON, MIN_DAYS, METRIC_LABELS
+from utils.session      import dq_scan_key, dq_reports_key
 from utils.validators   import get_data_coverage, build_quality_report
 from utils.formatters   import fmt_date
 

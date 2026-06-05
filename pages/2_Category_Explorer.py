@@ -25,6 +25,9 @@ from visualizations        import (
     plot_quartile_heatmap,    plot_metric_heatmap,
 )
 from utils.constants       import CATEGORIES, APP_TITLE, APP_ICON, METRIC_LABELS
+from utils.session         import (
+    category_analytics_key, category_full_df_key, category_fund_metrics_key,
+)
 from utils.formatters      import fmt_pct, fmt_ratio, fmt_days, format_metrics_for_display
 
 st.set_page_config(
