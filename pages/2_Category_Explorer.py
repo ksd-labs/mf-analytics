@@ -68,7 +68,8 @@ with st.sidebar:
 
     st.divider()
     if st.button("🔄 Refresh NAV Data", use_container_width=True):
-        st.cache_data.clear()
+        from utils.session import clear_analytics_cache
+        clear_analytics_cache()
         st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -138,10 +139,10 @@ run_analytics = st.button(
     use_container_width = True,
 )
 
-if run_analytics or st.session_state.get(f"analytics_done_{category}"):
+if run_analytics or st.session_state.get(category_analytics_key(category)):
 
     # ── Load NAVs with progress bar ───────────────────────────────────────────
-    if not st.session_state.get(f"analytics_done_{category}"):
+    if not st.session_state.get(category_analytics_key(category)):
         progress  = st.progress(0, text="Starting…")
         nav_dict  = {}
 
@@ -169,16 +170,16 @@ if run_analytics or st.session_state.get(f"analytics_done_{category}"):
             full_df    = compute_category_quartiles(fund_metrics)
             metrics_df = build_metrics_dataframe(fund_metrics)
 
-        st.session_state[f"fund_metrics_{category}"] = fund_metrics
-        st.session_state[f"full_df_{category}"]      = full_df
-        st.session_state[f"metrics_df_{category}"]   = metrics_df
-        st.session_state[f"analytics_done_{category}"] = True
+        st.session_state[category_fund_metrics_key(category)] = fund_metrics
+        st.session_state[category_full_df_key(category)]      = full_df
+        st.session_state[f"metrics_df_{category}_v"]   = metrics_df
+        st.session_state[category_analytics_key(category)] = True
         st.success(f"✅ Analytics computed for {len(fund_metrics)} funds!")
 
     # ── Retrieve cached results ────────────────────────────────────────────────
-    fund_metrics = st.session_state.get(f"fund_metrics_{category}", {})
-    full_df      = st.session_state.get(f"full_df_{category}",      pd.DataFrame())
-    metrics_df   = st.session_state.get(f"metrics_df_{category}",   pd.DataFrame())
+    fund_metrics = st.session_state.get(category_fund_metrics_key(category), {})
+    full_df      = st.session_state.get(category_full_df_key(category), pd.DataFrame())
+    metrics_df   = st.session_state.get(f"metrics_df_{category}_v", pd.DataFrame())
 
     if full_df.empty:
         st.warning("No analytics data available — some funds may lack sufficient history.")

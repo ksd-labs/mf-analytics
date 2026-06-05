@@ -63,12 +63,8 @@ with st.sidebar:
 
     st.divider()
 
-    if st.button("🔄 Refresh NAV Data"
-, use_container_width=True,
-                 help="Clears the 24-hour NAV cache and re-fetches all data."):
-        st.cache_data.clear()
-        st.success("Cache cleared — data will reload on next action.")
-        st.rerun()
+    from utils.session import render_refresh_button
+    render_refresh_button()
 
     st.caption(
         f"NAV sourced from AMFI via mfapi.in\n"

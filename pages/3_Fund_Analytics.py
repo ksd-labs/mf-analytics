@@ -99,7 +99,8 @@ with st.sidebar:
 
     st.divider()
     if st.button("🔄 Refresh NAV Data", use_container_width=True):
-        st.cache_data.clear()
+        from utils.session import clear_analytics_cache
+        clear_analytics_cache()
         st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -108,7 +109,7 @@ with st.sidebar:
 
 st.title(f"📋 Fund Analytics")
 
-cache_key = f"fund_metrics_{selected_code}_{rf_pct}"
+cache_key = _fund_key(selected_code, rf_pct)
 if cache_key not in st.session_state:
     with st.spinner(f"Loading NAV history for {selected_name[:60]}…"):
         nav_df = get_nav_history(selected_code)
@@ -253,8 +254,8 @@ with tab_alpha:
         )
     else:
         # Load benchmark and compute alpha if not already done
-        alpha_key = f"alpha_{selected_code}_{rf_pct}_{category}"
-        if alpha_key not in st.session_state:
+        alpha_cache_key = _alpha_key(selected_code, rf_pct, category)
+        if alpha_cache_key not in st.session_state:
             with st.spinner("Loading benchmark NAV and computing alpha metrics…"):
                 bm_nav_df = get_benchmark_nav(category)
                 from analytics.engine import compute_fund_metrics
@@ -266,9 +267,9 @@ with tab_alpha:
                     benchmark_nav_df=bm_nav_df,
                     benchmark_name=bm_info["display_name"],
                 )
-            st.session_state[alpha_key] = full_metrics
+            st.session_state[alpha_cache_key] = full_metrics
         else:
-            full_metrics = st.session_state[alpha_key]
+            full_metrics = st.session_state[alpha_cache_key]
 
         # ── Alpha KPI cards ───────────────────────────────────────────────────
         a1, a2, a3, a4, a5 = st.columns(5)

@@ -20,7 +20,12 @@ from typing import Dict, List
 APP_TITLE: str       = "MF Quantitative Analytics"
 APP_ICON: str        = "📊"
 APP_SUBTITLE: str    = "Institutional-Grade Mutual Fund Analysis · India"
-APP_VERSION: str     = "1.0.0"
+APP_VERSION: str       = "1.0.0"
+
+# Bump this string every time new metrics are added to the engine.
+# All session_state analytics cache keys include this value — changing it
+# forces every cached result to be recomputed automatically.
+ANALYTICS_VERSION: str = "phase_b"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FINANCIAL CONSTANTS

@@ -56,7 +56,8 @@ with st.sidebar:
 
     st.divider()
     if st.button("🔄 Refresh NAV Data", use_container_width=True):
-        st.cache_data.clear()
+        from utils.session import clear_analytics_cache
+        clear_analytics_cache()
         st.rerun()
 
     st.divider()
@@ -103,7 +104,7 @@ st.subheader(f"📂 {category} — {len(fund_list)} {plan_type} Funds")
 # LOAD NAV SUMMARIES (lighter than full analytics)
 # ─────────────────────────────────────────────────────────────────────────────
 
-scan_key = f"dq_scan_{category}"
+scan_key = dq_scan_key(category)
 
 run_scan = st.button(
     f"🔍 Scan NAV History for {len(fund_list)} Funds",
@@ -128,10 +129,10 @@ if run_scan or st.session_state.get(scan_key):
 
         progress.empty()
         st.session_state[scan_key]             = True
-        st.session_state[f"dq_reports_{category}"] = reports
+        st.session_state[dq_reports_key(category)] = reports
         st.success(f"✅ Scanned {len(reports)} funds.")
 
-    reports = st.session_state.get(f"dq_reports_{category}", {})
+    reports = st.session_state.get(dq_reports_key(category), {})
 
     if not reports:
         st.warning("No report data available.")

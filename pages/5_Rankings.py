@@ -71,7 +71,8 @@ with st.sidebar:
 
     st.divider()
     if st.button("🔄 Refresh NAV Data", use_container_width=True):
-        st.cache_data.clear()
+        from utils.session import clear_analytics_cache
+        clear_analytics_cache()
         st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -110,7 +111,7 @@ st.info(
     icon="⏱️",
 )
 
-analytics_key = f"rankings_done_{category}"
+analytics_key = rankings_done_key(category)
 run_btn = st.button(
     f"⚡ Compute Rankings for {category}  ({len(fund_list)} funds)",
     type="primary", use_container_width=True,
@@ -142,13 +143,13 @@ if run_btn or st.session_state.get(analytics_key):
             )
             full_df = compute_category_quartiles(fund_metrics)
 
-        st.session_state[f"full_df_{category}"]        = full_df
-        st.session_state[f"fund_metrics_{category}"]   = fund_metrics
+        st.session_state[category_full_df_key(category)]        = full_df
+        st.session_state[category_fund_metrics_key(category)]   = fund_metrics
         st.session_state[analytics_key]                 = True
         st.success(f"✅ Rankings ready for {len(fund_metrics)} funds!")
 
-    full_df      = st.session_state.get(f"full_df_{category}", pd.DataFrame())
-    fund_metrics = st.session_state.get(f"fund_metrics_{category}", {})
+    full_df      = st.session_state.get(category_full_df_key(category), pd.DataFrame())
+    fund_metrics = st.session_state.get(category_fund_metrics_key(category), {})
 
     if full_df.empty:
         st.warning("No data available for rankings.")
