@@ -20,6 +20,9 @@ import numpy as np
 
 from data.fund_loader       import get_all_categorized_schemes, get_nav_history
 from data.benchmark_loader  import get_benchmark_nav, get_benchmark_info
+from utils.session import (
+    rankings_done_key, category_full_df_key, category_fund_metrics_key,
+)
 from visualizations.alpha_charts   import plot_capture_scatter
 from visualizations.momentum_charts import (
     plot_momentum_bars, plot_bull_bear_alpha, plot_momentum_heatmap,

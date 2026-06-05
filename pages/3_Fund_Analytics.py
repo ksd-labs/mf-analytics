@@ -17,6 +17,7 @@ import numpy as np
 
 from data.fund_loader      import get_nav_history, get_all_categorized_schemes
 from data.benchmark_loader import get_benchmark_nav, get_benchmark_info
+from utils.session import alpha_key as _alpha_key, fund_key as _fund_key
 from analytics.engine      import compute_fund_metrics
 from visualizations.alpha_charts import (
     plot_fund_vs_benchmark, plot_rolling_alpha,
