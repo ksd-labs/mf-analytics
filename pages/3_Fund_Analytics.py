@@ -21,6 +21,9 @@ from analytics.engine      import compute_fund_metrics
 from visualizations.alpha_charts import (
     plot_fund_vs_benchmark, plot_rolling_alpha,
 )
+from visualizations.momentum_charts import (
+    plot_momentum_bars, plot_bull_bear_alpha, plot_alpha_persistence_timeline,
+)
 from visualizations        import (
     plot_single_nav,
     plot_drawdown,
@@ -337,6 +340,50 @@ with tab_alpha:
             else:
                 st.warning(f"⚠️ Alpha is **not statistically significant** (|t| = {sig:.2f} < 2.0) — performance may be noise.")
 
+        st.divider()
+
+        # ── Phase B: Momentum ─────────────────────────────────────────────────
+        st.subheader("📈 Return Momentum")
+        m1, m2, m3, m4, m5 = st.columns(5)
+        def _mkpi(col, label, val, pct=True):
+            if val is None or (isinstance(val, float) and np.isnan(val)):
+                col.metric(label, "N/A"); return
+            col.metric(label, f"{val*100:.2f}%" if pct else f"{val:.3f}")
+
+        _mkpi(m1, "3M Momentum",    full_metrics.get("momentum_3m"))
+        _mkpi(m2, "6M Momentum",    full_metrics.get("momentum_6m"))
+        _mkpi(m3, "12M Momentum",   full_metrics.get("momentum_12m"))
+        _mkpi(m4, "Alpha Momentum", full_metrics.get("alpha_momentum"))
+        _mkpi(m5, "Mom. Sharpe",    full_metrics.get("momentum_sharpe"), pct=False)
+
+        st.divider()
+
+        # ── Phase B: Persistence timeline ─────────────────────────────────────
+        st.subheader("🔁 Alpha Persistence")
+        p1, p2, p3, p4 = st.columns(4)
+        _mkpi(p1, "Persistence Score",   full_metrics.get("alpha_persistence"))
+        _mkpi(p2, "Bull Market Alpha",   full_metrics.get("bull_alpha"))
+        _mkpi(p3, "Bear Market Alpha",   full_metrics.get("bear_alpha"))
+        _mkpi(p4, "Alpha Regime Ratio",  full_metrics.get("alpha_regime_ratio"), pct=False)
+
+        if roll_alpha is not None:
+            st.plotly_chart(
+                plot_alpha_persistence_timeline(roll_alpha, selected_name),
+                use_container_width=True,
+            )
+
+        # ── Phase B: Bull / Bear alpha chart ─────────────────────────────────
+        if full_metrics.get("bull_alpha") is not None or full_metrics.get("bear_alpha") is not None:
+            st.plotly_chart(
+                plot_bull_bear_alpha({selected_name: full_metrics}),
+                use_container_width=True,
+            )
+
+        # ── Drawdown recovery ─────────────────────────────────────────────────
+        rec = full_metrics.get("drawdown_recovery_rate")
+        if rec is not None:
+            st.metric("Avg Drawdown Recovery", fmt_days(int(rec)))
+
 
 # ── TAB 2: ALL METRICS ────────────────────────────────────────────────────────
 with tab_metrics:
@@ -362,6 +409,32 @@ with tab_metrics:
             ("sharpe",  "Sharpe Ratio",  "ratio"),
             ("sortino", "Sortino Ratio", "ratio"),
             ("calmar",  "Calmar Ratio",  "ratio"),
+        ],
+        "⚡ Alpha (vs Benchmark)": [
+            ("excess_return",    "Excess Return (Ann.)",     "pct"),
+            ("beta",             "Beta",                     "ratio"),
+            ("r_squared",        "R-Squared",                "ratio"),
+            ("tracking_error",   "Tracking Error",           "pct"),
+            ("information_ratio","Information Ratio",        "ratio"),
+            ("jensens_alpha",    "Jensen's Alpha (Ann.)",   "pct"),
+            ("alpha_tstat",      "Alpha t-Statistic",        "ratio"),
+            ("up_capture",       "Up-Capture Ratio",         "num"),
+            ("down_capture",     "Down-Capture Ratio",       "num"),
+            ("capture_ratio",    "Capture Ratio",            "ratio"),
+        ],
+        "📈 Momentum": [
+            ("momentum_3m",    "3M Momentum",         "pct"),
+            ("momentum_6m",    "6M Momentum",         "pct"),
+            ("momentum_12m",   "12M Momentum",        "pct"),
+            ("alpha_momentum", "Alpha Momentum (12M)","pct"),
+            ("momentum_sharpe","Momentum Sharpe",     "ratio"),
+        ],
+        "🔁 Alpha Persistence": [
+            ("alpha_persistence",     "Alpha Persistence Score", "pct"),
+            ("bull_alpha",            "Bull Market Alpha",       "pct"),
+            ("bear_alpha",            "Bear Market Alpha",       "pct"),
+            ("alpha_regime_ratio",    "Alpha Regime Ratio",      "ratio"),
+            ("drawdown_recovery_rate","Drawdown Recovery (days)","days"),
         ],
         "🔁 Rolling Returns — 1 Year": [
             ("avg_rolling_1y",    "Average 1Y Rolling Return",    "pct"),

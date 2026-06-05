@@ -48,7 +48,9 @@ from analytics.consistency    import calc_all_consistency
 from analytics.distribution   import calc_all_distribution
 from analytics.stability      import calc_all_stability
 from analytics.persistence    import calc_all_persistence
-from analytics.alpha          import calc_all_alpha
+from analytics.alpha             import calc_all_alpha
+from analytics.momentum          import calc_all_momentum
+from analytics.alpha_persistence import calc_all_alpha_persistence
 from analytics.quartile       import build_full_quartile_table
 from utils.constants          import DEFAULT_RISK_FREE_RATE, MAR
 from utils.validators         import check_nav_series
@@ -115,6 +117,8 @@ def compute_fund_metrics(
     empty_result["_rolling_alpha"]   = None
     empty_result["_benchmark_nav"]   = None
     empty_result["_benchmark_name"]  = ""
+    # Phase B fields
+    empty_result["_benchmark_returns"] = None
 
     # ── Step 1: Process NAV ───────────────────────────────────────────────────
     if nav_df is None:
@@ -215,7 +219,30 @@ def compute_fund_metrics(
                 alpha_metrics = calc_all_alpha(f_returns_b, b_returns, rf_rate)
                 result["_rolling_alpha"]  = alpha_metrics.pop("_rolling_alpha", None)
                 result["_benchmark_nav"]  = benchmark_nav
+
+                # Store aligned benchmark returns for Phase B
+                result["_benchmark_returns"] = b_returns
                 result.update(alpha_metrics)
+
+    # ── Step 12: Momentum ─────────────────────────────────────────────────────
+    bm_returns_for_momentum = result.get("_benchmark_returns")
+    momentum_metrics = calc_all_momentum(
+        nav          = result.get("nav"),
+        fund_returns = result.get("returns"),
+        benchmark_returns = bm_returns_for_momentum,
+        rf_rate      = rf_rate,
+    )
+    result.update(momentum_metrics)
+
+    # ── Step 13: Alpha Persistence + Bull/Bear ────────────────────────────────
+    persistence_metrics = calc_all_alpha_persistence(
+        rolling_alpha     = result.get("_rolling_alpha"),
+        fund_returns      = result.get("returns"),
+        benchmark_returns = bm_returns_for_momentum,
+        nav               = result.get("nav"),
+        rf_rate           = rf_rate,
+    )
+    result.update(persistence_metrics)
 
     return result
 
@@ -412,4 +439,10 @@ _ALL_METRIC_KEYS: List[str] = [
     "excess_return", "beta", "r_squared", "tracking_error",
     "information_ratio", "jensens_alpha", "alpha_tstat",
     "up_capture", "down_capture", "capture_ratio",
+    # Phase B — Momentum
+    "momentum_3m", "momentum_6m", "momentum_12m",
+    "alpha_momentum", "momentum_sharpe",
+    # Phase B — Alpha Persistence & Regime
+    "alpha_persistence", "bull_alpha", "bear_alpha",
+    "alpha_regime_ratio", "drawdown_recovery_rate",
 ]

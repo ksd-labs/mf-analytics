@@ -290,6 +290,7 @@ LOWER_IS_BETTER: List[str] = [
     "worst_rolling_1y",
     "worst_rolling_3y",
     "down_capture",      # lower down-capture = better downside protection
+    "drawdown_recovery_rate",  # faster recovery = better
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -350,4 +351,16 @@ METRIC_LABELS: Dict[str, str] = {
     "up_capture":        "Up-Capture Ratio (%)",
     "down_capture":      "Down-Capture Ratio (%)",
     "capture_ratio":     "Capture Ratio",
+    # ── Phase B: Momentum ─────────────────────────────────────────────────────
+    "momentum_3m":       "3M Momentum",
+    "momentum_6m":       "6M Momentum",
+    "momentum_12m":      "12M Momentum",
+    "alpha_momentum":    "Alpha Momentum (12M)",
+    "momentum_sharpe":   "Momentum Sharpe",
+    # ── Phase B: Alpha Persistence & Regime ───────────────────────────────────
+    "alpha_persistence":      "Alpha Persistence Score",
+    "bull_alpha":             "Bull Market Alpha",
+    "bear_alpha":             "Bear Market Alpha",
+    "alpha_regime_ratio":     "Alpha Regime Ratio",
+    "drawdown_recovery_rate": "Drawdown Recovery (days)",
 }

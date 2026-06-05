@@ -20,7 +20,10 @@ import numpy as np
 
 from data.fund_loader       import get_all_categorized_schemes, get_nav_history
 from data.benchmark_loader  import get_benchmark_nav, get_benchmark_info
-from visualizations.alpha_charts import plot_capture_scatter
+from visualizations.alpha_charts   import plot_capture_scatter
+from visualizations.momentum_charts import (
+    plot_momentum_bars, plot_bull_bear_alpha, plot_momentum_heatmap,
+)
 from analytics.engine   import compute_category_metrics, compute_category_quartiles
 from analytics.quartile import build_metrics_dataframe, get_rankings_for_metric
 from utils.constants    import CATEGORIES, APP_TITLE, APP_ICON, METRIC_LABELS
@@ -211,13 +214,15 @@ if run_btn or st.session_state.get(analytics_key):
         )
 
     # ── RANKING TABS ──────────────────────────────────────────────────────────
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "📈 Performance",
         "⚖️ Risk-Adjusted",
         "⚠️ Risk",
         "🔁 Consistency",
         "📅 Stability",
         "⚡ Alpha",
+        "📊 Momentum",
+        "🔁 Persistence",
     ])
 
     # ── Tab 1: Performance ────────────────────────────────────────────────────
@@ -343,3 +348,93 @@ if run_btn or st.session_state.get(analytics_key):
                     _ranking_table("capture_ratio", "Capture Ratio", "ratio", ascending=False)
                     st.markdown("**Lowest — Down-Capture**")
                     _ranking_table("down_capture", "Down-Capture %", "num", ascending=True)
+
+    # ── Tab 7: Momentum ───────────────────────────────────────────────────────
+    with tab7:
+        st.subheader("📊 Momentum Rankings")
+        st.caption("Point-in-time returns over 3, 6, and 12 months. Higher = stronger recent momentum.")
+
+        if not st.session_state.get(analytics_key):
+            st.info("Run full analytics first to see momentum rankings.")
+        else:
+            # Momentum heatmap (category-wide)
+            if "momentum_12m" in full_df.columns:
+                st.plotly_chart(
+                    plot_momentum_heatmap(full_df),
+                    use_container_width=True,
+                )
+                st.divider()
+
+            cols_mom = st.columns(3, gap="large")
+            with cols_mom[0]:
+                st.markdown("**Top — 12M Momentum**")
+                _ranking_table("momentum_12m", "12M Return", "pct", ascending=False)
+            with cols_mom[1]:
+                st.markdown("**Top — 6M Momentum**")
+                _ranking_table("momentum_6m", "6M Return", "pct", ascending=False)
+            with cols_mom[2]:
+                st.markdown("**Top — Momentum Sharpe**")
+                _ranking_table("momentum_sharpe", "Mom. Sharpe", "ratio", ascending=False)
+
+            st.divider()
+            cols_mom2 = st.columns(2, gap="large")
+            with cols_mom2[0]:
+                st.markdown("**Top — 3M Momentum**")
+                _ranking_table("momentum_3m", "3M Return", "pct", ascending=False)
+            with cols_mom2[1]:
+                st.markdown("**Top — Alpha Momentum**")
+                _ranking_table("alpha_momentum", "Alpha Mom.", "pct", ascending=False)
+
+    # ── Tab 8: Alpha Persistence ──────────────────────────────────────────────
+    with tab8:
+        st.subheader("🔁 Alpha Persistence & Regime Rankings")
+        st.caption(
+            "Persistence = % of 1Y windows with positive alpha. "
+            "Bull/Bear alpha shows manager skill across market regimes."
+        )
+
+        if not st.session_state.get(analytics_key):
+            st.info("Run full analytics first to see persistence rankings.")
+        else:
+            has_persistence = (
+                "alpha_persistence" in full_df.columns and
+                full_df["alpha_persistence"].notna().any()
+            )
+
+            if not has_persistence:
+                st.info(
+                    "Persistence metrics require benchmark data. "
+                    "They will appear after re-running rankings.",
+                    icon="ℹ️",
+                )
+            else:
+                # Bull vs Bear chart
+                if "bull_alpha" in full_df.columns:
+                    # Build metrics dict for chart from full_df rows
+                    chart_data = {
+                        idx: {
+                            "is_valid": True,
+                            "bull_alpha": row.get("bull_alpha"),
+                            "bear_alpha": row.get("bear_alpha"),
+                        }
+                        for idx, row in full_df.iterrows()
+                        if pd.notna(row.get("bull_alpha")) or pd.notna(row.get("bear_alpha"))
+                    }
+                    if chart_data:
+                        st.plotly_chart(
+                            plot_bull_bear_alpha(chart_data),
+                            use_container_width=True,
+                        )
+                    st.divider()
+
+                cols_p = st.columns(2, gap="large")
+                with cols_p[0]:
+                    st.markdown("**Top — Alpha Persistence Score**")
+                    _ranking_table("alpha_persistence", "Persistence", "pct", ascending=False)
+                    st.markdown("**Top — Bear Market Alpha**")
+                    _ranking_table("bear_alpha", "Bear Alpha", "pct", ascending=False)
+                with cols_p[1]:
+                    st.markdown("**Top — Bull Market Alpha**")
+                    _ranking_table("bull_alpha", "Bull Alpha", "pct", ascending=False)
+                    st.markdown("**Fastest — Drawdown Recovery**")
+                    _ranking_table("drawdown_recovery_rate", "Recovery (days)", "days", ascending=True)

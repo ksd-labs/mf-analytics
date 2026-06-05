@@ -134,10 +134,16 @@ QUARTILE_METRICS: List[str] = [
     "skewness", "kurtosis",
     "positive_freq", "negative_freq", "win_rate",
     "pct_positive_rolling_1y", "pct_positive_rolling_3y",
-    # Alpha Generation
+    # Alpha Generation (Phase A)
     "excess_return", "beta", "r_squared", "tracking_error",
     "information_ratio", "jensens_alpha", "alpha_tstat",
     "up_capture", "down_capture", "capture_ratio",
+    # Phase B — Momentum
+    "momentum_3m", "momentum_6m", "momentum_12m",
+    "alpha_momentum", "momentum_sharpe",
+    # Phase B — Alpha Persistence & Regime
+    "alpha_persistence", "bull_alpha", "bear_alpha",
+    "alpha_regime_ratio", "drawdown_recovery_rate",
 ]
 
 
