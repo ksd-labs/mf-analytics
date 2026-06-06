@@ -51,6 +51,7 @@ from analytics.persistence    import calc_all_persistence
 from analytics.alpha             import calc_all_alpha
 from analytics.momentum          import calc_all_momentum
 from analytics.alpha_persistence import calc_all_alpha_persistence
+from analytics.factor_model      import calc_all_factor_model
 from analytics.quartile       import build_full_quartile_table
 from utils.constants          import DEFAULT_RISK_FREE_RATE, MAR
 from utils.validators         import check_nav_series
@@ -68,6 +69,7 @@ def compute_fund_metrics(
     fund_name: str = "",
     benchmark_nav_df: Optional[pd.DataFrame] = None,
     benchmark_name: str = "",
+    factor_returns_df: Optional[pd.DataFrame] = None,
 ) -> Dict:
     """
     Compute all quantitative metrics for a single mutual fund.
@@ -119,6 +121,9 @@ def compute_fund_metrics(
     empty_result["_benchmark_name"]  = ""
     # Phase B fields
     empty_result["_benchmark_returns"] = None
+    # Phase C fields
+    empty_result["_rolling_alpha_4f"] = None
+    empty_result["_factor_names_used"] = []
 
     # ── Step 1: Process NAV ───────────────────────────────────────────────────
     if nav_df is None:
@@ -244,6 +249,24 @@ def compute_fund_metrics(
     )
     result.update(persistence_metrics)
 
+    # ── Step 14: Factor Model (Fama-French-Carhart 4-Factor) ──────────────────
+    result["_rolling_alpha_4f"]  = None
+    result["_factor_names_used"] = []
+
+    if factor_returns_df is not None and not factor_returns_df.empty:
+        fund_ret_for_factors = result.get("returns")
+        if fund_ret_for_factors is not None:
+            factor_metrics = calc_all_factor_model(
+                fund_returns = fund_ret_for_factors,
+                factor_df    = factor_returns_df,
+                rf_rate      = rf_rate,
+            )
+            result["_rolling_alpha_4f"]  = factor_metrics.pop("_rolling_alpha_4f", None)
+            result["_factor_names_used"] = factor_metrics.pop("factors_used", [])
+            # Remove non-scalar keys before updating
+            factor_metrics.pop("n_factors", None)
+            result.update(factor_metrics)
+
     return result
 
 
@@ -257,6 +280,7 @@ def compute_category_metrics(
     progress_bar=None,
     benchmark_nav_df: Optional[pd.DataFrame] = None,
     benchmark_name:   str = "",
+    factor_returns_df: Optional[pd.DataFrame] = None,
 ) -> Dict[str, Dict]:
     """
     Compute metrics for all funds in a category.
@@ -295,10 +319,11 @@ def compute_category_metrics(
         try:
             metrics = compute_fund_metrics(
                 nav_df,
-                rf_rate          = rf_rate,
-                fund_name        = fund_name,
-                benchmark_nav_df = benchmark_nav_df,   # same benchmark for every fund
-                benchmark_name   = benchmark_name,
+                rf_rate           = rf_rate,
+                fund_name         = fund_name,
+                benchmark_nav_df  = benchmark_nav_df,
+                benchmark_name    = benchmark_name,
+                factor_returns_df = factor_returns_df,  # same factors for every fund
             )
             results[fund_name] = metrics
         except Exception as e:
@@ -393,7 +418,15 @@ def get_cached_category_metrics(
     if bm_nav_df is not None:
         logger.info(f"Benchmark loaded for {category}: {bm_name}")
     else:
-        logger.warning(f"No benchmark available for {category} — alpha metrics will be skipped")
+        logger.warning(f"No benchmark available for {category} — alpha metrics skipped")
+
+    # Load factor returns ONCE for the whole category (Phase C)
+    from data.factor_loader import get_factor_returns
+    factor_df, factor_proxy_names = get_factor_returns(rf_rate=rf_rate)
+    if factor_df is not None:
+        logger.info(f"Factor returns loaded: {list(factor_df.columns)}, {len(factor_df)} days")
+    else:
+        logger.warning("Factor returns not available — factor model skipped")
 
     # Load NAVs (each individual NAV is cached by get_nav_history)
     nav_dict = {
@@ -401,12 +434,13 @@ def get_cached_category_metrics(
         for fund in fund_list
     }
 
-    # Pass benchmark to every fund — alpha computed automatically
+    # Pass benchmark AND factor returns to every fund
     return compute_category_metrics(
         nav_dict,
-        rf_rate          = rf_rate,
-        benchmark_nav_df = bm_nav_df,
-        benchmark_name   = bm_name,
+        rf_rate           = rf_rate,
+        benchmark_nav_df  = bm_nav_df,
+        benchmark_name    = bm_name,
+        factor_returns_df = factor_df,
     )
 
 
@@ -445,4 +479,9 @@ _ALL_METRIC_KEYS: List[str] = [
     # Phase B — Alpha Persistence & Regime
     "alpha_persistence", "bull_alpha", "bear_alpha",
     "alpha_regime_ratio", "drawdown_recovery_rate",
+    # Phase C — Factor Model
+    "alpha_4f", "alpha_4f_tstat", "beta_market_4f",
+    "beta_smb", "beta_hml", "beta_wml", "r_squared_4f",
+    "contrib_market", "contrib_smb", "contrib_hml",
+    "contrib_wml", "contrib_alpha",
 ]

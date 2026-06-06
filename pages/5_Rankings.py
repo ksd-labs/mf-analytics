@@ -24,6 +24,9 @@ from utils.session import (
     rankings_done_key, category_full_df_key, category_fund_metrics_key,
 )
 from visualizations.alpha_charts   import plot_capture_scatter
+from visualizations.factor_charts   import (
+    plot_factor_loadings, plot_factor_contribution, plot_factor_heatmap,
+)
 from visualizations.momentum_charts import (
     plot_momentum_bars, plot_bull_bear_alpha, plot_momentum_heatmap,
 )
@@ -133,16 +136,19 @@ if run_btn or st.session_state.get(analytics_key):
             nav_dict[fund["name"]] = get_nav_history(fund["code"])
         progress.empty()
 
-        with st.spinner("Computing metrics + alpha for all funds…"):
+        with st.spinner("Computing metrics + alpha + factor model…"):
             from data.benchmark_loader import get_benchmark_nav, get_benchmark_info
-            bm_info   = get_benchmark_info(category)
-            bm_nav_df = get_benchmark_nav(category) if bm_info["available"] else None
+            from data.factor_loader    import get_factor_returns
+            bm_info    = get_benchmark_info(category)
+            bm_nav_df  = get_benchmark_nav(category) if bm_info["available"] else None
+            factor_df, _ = get_factor_returns(rf_rate=rf_rate)
 
             fund_metrics = compute_category_metrics(
                 nav_dict,
-                rf_rate          = rf_rate,
-                benchmark_nav_df = bm_nav_df,
-                benchmark_name   = bm_info["display_name"],
+                rf_rate           = rf_rate,
+                benchmark_nav_df  = bm_nav_df,
+                benchmark_name    = bm_info["display_name"],
+                factor_returns_df = factor_df,
             )
             full_df = compute_category_quartiles(fund_metrics)
 
@@ -218,7 +224,7 @@ if run_btn or st.session_state.get(analytics_key):
         )
 
     # ── RANKING TABS ──────────────────────────────────────────────────────────
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
         "📈 Performance",
         "⚖️ Risk-Adjusted",
         "⚠️ Risk",
@@ -227,6 +233,7 @@ if run_btn or st.session_state.get(analytics_key):
         "⚡ Alpha",
         "📊 Momentum",
         "🔁 Persistence",
+        "🔬 Factor Model",
     ])
 
     # ── Tab 1: Performance ────────────────────────────────────────────────────
@@ -442,3 +449,88 @@ if run_btn or st.session_state.get(analytics_key):
                     _ranking_table("bull_alpha", "Bull Alpha", "pct", ascending=False)
                     st.markdown("**Fastest — Drawdown Recovery**")
                     _ranking_table("drawdown_recovery_rate", "Recovery (days)", "days", ascending=True)
+
+    # ── Tab 9: Factor Model ───────────────────────────────────────────────────
+    with tab9:
+        st.subheader("🔬 Factor Model Rankings")
+        st.caption(
+            "4-Factor alpha controls for Market, Size (SMB), Value (HML), "
+            "and Momentum (WML) tilts. Higher alpha = purer manager skill."
+        )
+
+        if not st.session_state.get(analytics_key):
+            st.info("Run full analytics first to see factor model rankings.")
+        else:
+            has_factor = (
+                "alpha_4f" in full_df.columns and
+                full_df["alpha_4f"].notna().any()
+            )
+
+            if not has_factor:
+                from data.factor_loader import get_factor_availability, FACTOR_DISPLAY_NAMES
+                avail = get_factor_availability()
+                n_avail = sum(avail.values())
+                if n_avail == 0:
+                    st.warning("No factor proxy index funds found. Check connectivity.")
+                else:
+                    st.info(
+                        f"Factor proxies available ({n_avail}/4 factors). "
+                        "Re-run rankings to include factor model.",
+                        icon="ℹ️",
+                    )
+            else:
+                # Factor heatmap
+                st.plotly_chart(
+                    plot_factor_heatmap(full_df),
+                    use_container_width=True,
+                )
+                st.divider()
+
+                # Build chart data from full_df
+                chart_data = {
+                    idx: {"is_valid": True, **{
+                        col: row.get(col)
+                        for col in ["alpha_4f","beta_market_4f","beta_smb",
+                                    "beta_hml","beta_wml","contrib_market",
+                                    "contrib_smb","contrib_hml","contrib_wml",
+                                    "contrib_alpha"]
+                    }}
+                    for idx, row in full_df.iterrows()
+                    if pd.notna(row.get("alpha_4f"))
+                }
+
+                ch1, ch2 = st.columns(2, gap="medium")
+                with ch1:
+                    st.plotly_chart(
+                        plot_factor_loadings(chart_data),
+                        use_container_width=True,
+                    )
+                with ch2:
+                    st.plotly_chart(
+                        plot_factor_contribution(chart_data),
+                        use_container_width=True,
+                    )
+
+                st.divider()
+                cols_f = st.columns(3, gap="large")
+                with cols_f[0]:
+                    st.markdown("**Top — 4-Factor Alpha**")
+                    _ranking_table("alpha_4f", "4F Alpha", "pct", ascending=False)
+                with cols_f[1]:
+                    st.markdown("**Top — Pure Alpha Contribution**")
+                    _ranking_table("contrib_alpha", "Alpha Contrib", "pct", ascending=False)
+                with cols_f[2]:
+                    st.markdown("**Highest — 4-Factor R-Squared**")
+                    _ranking_table("r_squared_4f", "4F R²", "ratio", ascending=False)
+
+                st.divider()
+                cols_f2 = st.columns(3, gap="large")
+                with cols_f2[0]:
+                    st.markdown("**Size Loading (SMB β)**")
+                    _ranking_table("beta_smb", "SMB β", "ratio", ascending=False)
+                with cols_f2[1]:
+                    st.markdown("**Value Loading (HML β)**")
+                    _ranking_table("beta_hml", "HML β", "ratio", ascending=False)
+                with cols_f2[2]:
+                    st.markdown("**Momentum Loading (WML β)**")
+                    _ranking_table("beta_wml", "WML β", "ratio", ascending=False)

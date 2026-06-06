@@ -25,6 +25,10 @@ from visualizations.alpha_charts import (
 from visualizations.momentum_charts import (
     plot_momentum_bars, plot_bull_bear_alpha, plot_alpha_persistence_timeline,
 )
+from visualizations.factor_charts import (
+    plot_factor_loadings, plot_factor_contribution,
+    plot_rolling_alpha_4f, plot_factor_heatmap,
+)
 from visualizations        import (
     plot_single_nav,
     plot_drawdown,
@@ -182,9 +186,10 @@ st.divider()
 # TABS
 # ─────────────────────────────────────────────────────────────────────────────
 
-tab_charts, tab_alpha, tab_metrics, tab_quality = st.tabs([
+tab_charts, tab_alpha, tab_factor, tab_metrics, tab_quality = st.tabs([
     "📈 Charts",
     "⚡ Alpha Analytics",
+    "🔬 Factor Model",
     "📊 All Metrics",
     "🔬 Data Quality",
 ])
@@ -387,6 +392,136 @@ with tab_alpha:
             st.metric("Avg Drawdown Recovery", fmt_days(int(rec)))
 
 
+# ── TAB FACTOR: FACTOR MODEL ─────────────────────────────────────────────────
+with tab_factor:
+    st.subheader("🔬 Factor Model (Fama-French-Carhart)")
+
+    from data.factor_loader import get_factor_returns, get_factor_availability, FACTOR_DISPLAY_NAMES
+    avail = get_factor_availability()
+    n_factors = sum(avail.values())
+
+    st.info(
+        f"**Model:** {n_factors}-Factor  |  "
+        + "  |  ".join([
+            f"{'✅' if avail.get(f) else '❌'} {FACTOR_DISPLAY_NAMES.get(f, f)}"
+            for f in ['market','smb','hml','wml']
+        ]),
+        icon="📐",
+    )
+
+    if n_factors == 0:
+        st.warning("No factor proxy index funds found. Check internet connection.")
+    else:
+        # Load factor returns and compute factor model
+        factor_key = f"factor_{selected_code}_{rf_pct}"
+        if factor_key not in st.session_state:
+            with st.spinner("Loading factor data and computing 4-factor model…"):
+                factor_df, _ = get_factor_returns(rf_rate=rf_rate)
+                from analytics.engine import compute_fund_metrics
+                from data.fund_loader import get_nav_history as _gnav2
+                from data.benchmark_loader import get_benchmark_nav, get_benchmark_info
+                nav_df_f  = _gnav2(selected_code)
+                bm_info_f = get_benchmark_info(category)
+                bm_nav_f  = get_benchmark_nav(category) if bm_info_f["available"] else None
+                factor_metrics = compute_fund_metrics(
+                    nav_df_f, rf_rate=rf_rate,
+                    fund_name=selected_name,
+                    benchmark_nav_df=bm_nav_f,
+                    benchmark_name=bm_info_f["display_name"],
+                    factor_returns_df=factor_df,
+                )
+            st.session_state[factor_key] = factor_metrics
+        else:
+            factor_metrics = st.session_state[factor_key]
+
+        # ── Factor KPI cards ──────────────────────────────────────────────────
+        f1, f2, f3, f4, f5 = st.columns(5)
+        def _fkpi(col, label, val, pct=False, ratio=False):
+            if val is None or (isinstance(val, float) and __import__('numpy').isnan(val)):
+                col.metric(label, "N/A"); return
+            col.metric(label, f"{val*100:.2f}%" if pct else f"{val:.3f}")
+
+        _fkpi(f1, "4F Alpha (Ann.)",  factor_metrics.get("alpha_4f"),      pct=True)
+        _fkpi(f2, "4F t-Stat",        factor_metrics.get("alpha_4f_tstat"))
+        _fkpi(f3, "Market β",         factor_metrics.get("beta_market_4f"))
+        _fkpi(f4, "Size β (SMB)",     factor_metrics.get("beta_smb"))
+        _fkpi(f5, "4F R²",            factor_metrics.get("r_squared_4f"))
+
+        st.divider()
+
+        # ── Value β and Momentum β ────────────────────────────────────────────
+        f6, f7, f8, f9 = st.columns(4)
+        _fkpi(f6, "Value β (HML)",    factor_metrics.get("beta_hml"))
+        _fkpi(f7, "Momentum β (WML)", factor_metrics.get("beta_wml"))
+        _fkpi(f8, "Pure Alpha Contrib",factor_metrics.get("contrib_alpha"), pct=True)
+        _fkpi(f9, "Market Contrib",   factor_metrics.get("contrib_market"), pct=True)
+
+        st.divider()
+
+        # ── Charts ────────────────────────────────────────────────────────────
+        ch1, ch2 = st.columns(2, gap="medium")
+        with ch1:
+            st.plotly_chart(
+                plot_factor_loadings({selected_name: factor_metrics}),
+                use_container_width=True,
+            )
+        with ch2:
+            st.plotly_chart(
+                plot_factor_contribution({selected_name: factor_metrics}),
+                use_container_width=True,
+            )
+
+        roll_4f = factor_metrics.get("_rolling_alpha_4f")
+        if roll_4f is not None:
+            st.plotly_chart(
+                plot_rolling_alpha_4f({selected_name: roll_4f}),
+                use_container_width=True,
+            )
+        else:
+            st.info("Rolling 4-Factor Alpha requires 2+ years of factor history.")
+
+        # ── Statistical significance ──────────────────────────────────────────
+        tstat = factor_metrics.get("alpha_4f_tstat")
+        if tstat is not None:
+            if abs(tstat) >= 2.0:
+                st.success(
+                    f"✅ 4-Factor Alpha is **statistically significant** "
+                    f"(|t| = {tstat:.2f} ≥ 2.0) — true manager skill confirmed."
+                )
+            else:
+                st.warning(
+                    f"⚠️ 4-Factor Alpha is **not significant** "
+                    f"(|t| = {tstat:.2f} < 2.0) — may be factor tilts, not skill."
+                )
+
+        # ── Factor metrics table ───────────────────────────────────────────────
+        with st.expander("Full Factor Model Output"):
+            FACTOR_METRICS_TABLE = [
+                ("alpha_4f",       "4-Factor Alpha (Ann.)",    "pct"),
+                ("alpha_4f_tstat", "4-Factor Alpha t-Stat",    "ratio"),
+                ("beta_market_4f", "Market Beta",              "ratio"),
+                ("beta_smb",       "Size Loading (SMB)",       "ratio"),
+                ("beta_hml",       "Value Loading (HML)",      "ratio"),
+                ("beta_wml",       "Momentum Loading (WML)",   "ratio"),
+                ("r_squared_4f",   "4-Factor R-Squared",       "ratio"),
+                ("contrib_market", "Market Contribution",      "pct"),
+                ("contrib_smb",    "Size Contribution",        "pct"),
+                ("contrib_hml",    "Value Contribution",       "pct"),
+                ("contrib_wml",    "Momentum Contribution",    "pct"),
+                ("contrib_alpha",  "Pure Alpha Contribution",  "pct"),
+            ]
+            rows = []
+            for key, label, kind in FACTOR_METRICS_TABLE:
+                val = factor_metrics.get(key)
+                if val is None or (isinstance(val, float) and np.isnan(val)):
+                    disp = "N/A"
+                elif kind == "pct":   disp = fmt_pct(val)
+                elif kind == "ratio": disp = fmt_ratio(val)
+                else: disp = str(val)
+                rows.append({"Metric": label, "Value": disp})
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
 # ── TAB 2: ALL METRICS ────────────────────────────────────────────────────────
 with tab_metrics:
     st.caption("All 31 quantitative metrics computed for this fund.")
@@ -437,6 +572,20 @@ with tab_metrics:
             ("bear_alpha",            "Bear Market Alpha",       "pct"),
             ("alpha_regime_ratio",    "Alpha Regime Ratio",      "ratio"),
             ("drawdown_recovery_rate","Drawdown Recovery (days)","days"),
+        ],
+        "🔬 Factor Model (4-Factor)": [
+            ("alpha_4f",       "4-Factor Alpha (Ann.)",   "pct"),
+            ("alpha_4f_tstat", "4-Factor t-Stat",         "ratio"),
+            ("beta_market_4f", "Market Beta",             "ratio"),
+            ("beta_smb",       "Size Loading (SMB)",      "ratio"),
+            ("beta_hml",       "Value Loading (HML)",     "ratio"),
+            ("beta_wml",       "Momentum Loading (WML)",  "ratio"),
+            ("r_squared_4f",   "4-Factor R-Squared",      "ratio"),
+            ("contrib_market", "Market Contribution",     "pct"),
+            ("contrib_smb",    "Size Contribution",       "pct"),
+            ("contrib_hml",    "Value Contribution",      "pct"),
+            ("contrib_wml",    "Momentum Contribution",   "pct"),
+            ("contrib_alpha",  "Pure Alpha Contribution", "pct"),
         ],
         "🔁 Rolling Returns — 1 Year": [
             ("avg_rolling_1y",    "Average 1Y Rolling Return",    "pct"),

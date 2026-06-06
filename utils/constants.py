@@ -25,7 +25,7 @@ APP_VERSION: str       = "1.0.0"
 # Bump this string every time new metrics are added to the engine.
 # All session_state analytics cache keys include this value — changing it
 # forces every cached result to be recomputed automatically.
-ANALYTICS_VERSION: str = "phase_b"
+ANALYTICS_VERSION: str = "phase_c"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FINANCIAL CONSTANTS
@@ -368,4 +368,17 @@ METRIC_LABELS: Dict[str, str] = {
     "bear_alpha":             "Bear Market Alpha",
     "alpha_regime_ratio":     "Alpha Regime Ratio",
     "drawdown_recovery_rate": "Drawdown Recovery (days)",
+    # ── Phase C: Factor Model ─────────────────────────────────────────────────
+    "alpha_4f":        "4-Factor Alpha (Ann.)",
+    "alpha_4f_tstat":  "4-Factor Alpha t-Stat",
+    "beta_market_4f":  "Market Beta (4F)",
+    "beta_smb":        "Size Loading (SMB)",
+    "beta_hml":        "Value Loading (HML)",
+    "beta_wml":        "Momentum Loading (WML)",
+    "r_squared_4f":    "4-Factor R-Squared",
+    "contrib_market":  "Market Contribution (%)",
+    "contrib_smb":     "Size Contribution (%)",
+    "contrib_hml":     "Value Contribution (%)",
+    "contrib_wml":     "Momentum Contribution (%)",
+    "contrib_alpha":   "Pure Alpha Contribution (%)",
 }

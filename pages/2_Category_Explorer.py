@@ -164,11 +164,14 @@ if run_analytics or st.session_state.get(category_analytics_key(category)):
             bm_info   = get_benchmark_info(category)
             bm_nav_df = get_benchmark_nav(category) if bm_info["available"] else None
 
+            from data.factor_loader import get_factor_returns
+            factor_df_cat, _ = get_factor_returns(rf_rate=rf_rate)
             fund_metrics = compute_category_metrics(
                 nav_dict,
-                rf_rate          = rf_rate,
-                benchmark_nav_df = bm_nav_df,
-                benchmark_name   = bm_info["display_name"],
+                rf_rate           = rf_rate,
+                benchmark_nav_df  = bm_nav_df,
+                benchmark_name    = bm_info["display_name"],
+                factor_returns_df = factor_df_cat,
             )
             full_df    = compute_category_quartiles(fund_metrics)
             metrics_df = build_metrics_dataframe(fund_metrics)

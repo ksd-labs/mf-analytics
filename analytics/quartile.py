@@ -144,6 +144,11 @@ QUARTILE_METRICS: List[str] = [
     # Phase B — Alpha Persistence & Regime
     "alpha_persistence", "bull_alpha", "bear_alpha",
     "alpha_regime_ratio", "drawdown_recovery_rate",
+    # Phase C — Factor Model
+    "alpha_4f", "alpha_4f_tstat", "beta_market_4f",
+    "beta_smb", "beta_hml", "beta_wml", "r_squared_4f",
+    "contrib_market", "contrib_smb", "contrib_hml",
+    "contrib_wml", "contrib_alpha",
 ]
 
 
