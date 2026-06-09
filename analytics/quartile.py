@@ -149,6 +149,7 @@ QUARTILE_METRICS: List[str] = [
     "beta_smb", "beta_hml", "beta_wml", "r_squared_4f",
     "contrib_market", "contrib_smb", "contrib_hml",
     "contrib_wml", "contrib_alpha",
+    "active_share_proxy_te", "active_share_proxy_r2", "active_bet_score",
 ]
 
 

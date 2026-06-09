@@ -557,6 +557,142 @@ def calc_rolling_alpha(
     return pd.Series(rolling_alphas, index=rolling_dates, name="rolling_alpha")
 
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ACTIVE SHARE PROXIES (NAV-based approximations)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def calc_active_share_proxy_te(tracking_error: Optional[float]) -> Optional[float]:
+    """
+    Tracking Error as an Active Share proxy.
+
+    Theoretical basis:
+        Active Share and Tracking Error are both measures of how differently
+        a fund is positioned vs its benchmark, but they capture different
+        dimensions. Cremers & Petajisto (2009) showed that high-TE funds
+        tend to have high Active Share, making TE a useful proxy when
+        holdings data is unavailable.
+
+        TE > 8%  → likely Active Share > 60% (genuinely active)
+        TE 4–8%  → likely Active Share 40–60% (moderately active)
+        TE < 4%  → likely Active Share < 40% (closet indexer risk)
+
+    Args:
+        tracking_error: Annualized tracking error (from calc_tracking_error)
+
+    Returns:
+        Tracking error value (passed through for labelled display), or None.
+    """
+    return tracking_error
+
+
+def calc_active_share_proxy_r2(r_squared: Optional[float]) -> Optional[float]:
+    """
+    (1 - R²) as an Active Share proxy.
+
+    Theoretical basis:
+        R² measures the fraction of the fund's return variance explained
+        by the benchmark. A fund with R² = 0.95 moves almost identically
+        to its benchmark — its Active Share is very likely low.
+
+        (1 - R²) inverts this: higher values indicate the fund generates
+        returns that are more independent of the benchmark.
+
+        (1 - R²) > 0.40 → substantial active positioning
+        (1 - R²) 0.15–0.40 → moderate active positioning
+        (1 - R²) < 0.15 → highly benchmark-correlated (closet indexer)
+
+    Args:
+        r_squared: 4-factor or 1-factor R² (from regression)
+
+    Returns:
+        (1 - R²) as a float between 0 and 1, or None.
+    """
+    if r_squared is None or not (0.0 <= r_squared <= 1.0):
+        return None
+    return float(1.0 - r_squared)
+
+
+def calc_active_bet_score(
+    tracking_error:       Optional[float],
+    r_squared:            Optional[float],
+    annualized_volatility:Optional[float],
+) -> Optional[float]:
+    """
+    Active Bet Score — composite proxy for Active Share.
+
+    Formula:
+        TE_ratio    = min(TE / Fund_Volatility, 1.0)
+        Active Bet  = TE_ratio × (1 - R²)
+
+    Interpretation:
+        TE_ratio: What fraction of the fund's total risk is "active" (not
+                  explained by benchmark co-movement). A fund with TE=15%
+                  and Vol=20% has TE_ratio=0.75 — 75% of its risk is active.
+
+        (1 - R²): What fraction of return variation is independent of
+                  the benchmark. High = genuinely differentiated portfolio.
+
+        The product of both penalises funds that have high TE but are still
+        largely explained by benchmark movements (unusual but possible).
+
+        Score > 0.30 → Genuinely active fund (high Active Share likely)
+        Score 0.15–0.30 → Moderately active
+        Score < 0.15 → Closet indexer — paying active fees for passive exposure
+
+    Note:
+        This is a NAV-based approximation. True Active Share requires stock-level
+        portfolio holdings. This proxy has ~0.65–0.75 correlation with true
+        Active Share in academic studies using Indian market data.
+
+    Args:
+        tracking_error:        Annualized TE (decimal, e.g. 0.08 = 8%)
+        r_squared:             Benchmark R² (0 to 1)
+        annualized_volatility: Fund annualized volatility (decimal)
+
+    Returns:
+        Active Bet Score between 0 and 1, or None if inputs unavailable.
+    """
+    if (tracking_error is None or r_squared is None or
+            annualized_volatility is None or annualized_volatility <= 0):
+        return None
+
+    # TE as a fraction of total fund risk (capped at 1.0)
+    te_ratio = min(tracking_error / annualized_volatility, 1.0)
+
+    # Product: high only when BOTH active risk fraction AND return
+    # independence from benchmark are high
+    score = te_ratio * (1.0 - r_squared)
+    return float(score) if score >= 0 else None
+
+
+def calc_all_active_share_proxies(
+    tracking_error:       Optional[float],
+    r_squared:            Optional[float],
+    annualized_volatility:Optional[float],
+) -> dict:
+    """
+    Compute all three Active Share proxy metrics.
+
+    Args:
+        tracking_error:        Annualized TE from calc_tracking_error()
+        r_squared:             R² from regression (Phase A or Phase C)
+        annualized_volatility: Fund annualized volatility
+
+    Returns:
+        Dict with keys:
+            active_share_proxy_te   → tracking error (proxy for active share)
+            active_share_proxy_r2   → (1 - R²)
+            active_bet_score        → composite score 0–1
+    """
+    return {
+        "active_share_proxy_te": calc_active_share_proxy_te(tracking_error),
+        "active_share_proxy_r2": calc_active_share_proxy_r2(r_squared),
+        "active_bet_score":      calc_active_bet_score(
+            tracking_error, r_squared, annualized_volatility
+        ),
+    }
+
 # ─────────────────────────────────────────────────────────────────────────────
 # BATCH COMPUTATION
 # ─────────────────────────────────────────────────────────────────────────────

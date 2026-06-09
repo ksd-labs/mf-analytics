@@ -91,7 +91,8 @@ with st.sidebar:
 
     st.divider()
     if st.button("🔄 Refresh NAV Data", use_container_width=True):
-        st.cache_data.clear()
+        from utils.session import clear_analytics_cache
+        clear_analytics_cache()
         st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -106,8 +107,8 @@ if len(selected_funds) < 2:
 
 st.subheader(f"Comparing {len(selected_funds)} {plan_type} funds — {category}")
 st.caption(
-    "All charts use a common date range where all selected funds have NAV data. "
-    "Newer funds may have a shorter common period."
+    "Returns shown as % gain/loss from the common start date. "
+    "Each fund starts at 0% — differences reflect true relative performance."
 )
 st.divider()
 
@@ -161,7 +162,7 @@ r1c1, r1c2 = st.columns(2, gap="medium")
 with r1c1:
     st.plotly_chart(
         plot_nav_history(nav_dict, normalize=True,
-                         title="NAV Comparison (Rebased to 100)"),
+                         title="Return Comparison (% from Common Start Date)"),
         use_container_width=True,
     )
 with r1c2:

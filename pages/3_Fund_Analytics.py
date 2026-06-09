@@ -25,10 +25,7 @@ from visualizations.alpha_charts import (
 from visualizations.momentum_charts import (
     plot_momentum_bars, plot_bull_bear_alpha, plot_alpha_persistence_timeline,
 )
-from visualizations.factor_charts import (
-    plot_factor_loadings, plot_factor_contribution,
-    plot_rolling_alpha_4f, plot_factor_heatmap,
-)
+from visualizations.factor_charts import plot_rolling_alpha_4f
 from visualizations        import (
     plot_single_nav,
     plot_drawdown,
@@ -349,6 +346,78 @@ with tab_alpha:
 
         st.divider()
 
+        # ── Active Share Proxies ──────────────────────────────────────────────
+        st.subheader("📐 Active Share Proxies")
+        st.caption(
+            "True Active Share requires portfolio holdings data (not available via mftool). "
+            "These NAV-based proxies estimate how actively managed the fund is vs its benchmark. "
+            "Higher values = more differentiated from benchmark = more genuinely active."
+        )
+
+        as1, as2, as3 = st.columns(3)
+        te_val  = full_metrics.get("active_share_proxy_te")
+        r2_val  = full_metrics.get("active_share_proxy_r2")
+        abs_val = full_metrics.get("active_bet_score")
+
+        as1.metric(
+            "TE Proxy",
+            fmt_pct(te_val) if te_val is not None else "N/A",
+            help="Tracking Error — higher means fund deviates more from benchmark. "
+                 "TE > 8% → likely high Active Share.",
+        )
+        as2.metric(
+            "1 − R² Proxy",
+            f"{r2_val:.3f}" if r2_val is not None else "N/A",
+            help="(1 − R²) — fraction of return variation not explained by benchmark. "
+                 "> 0.40 → substantial active positioning.",
+        )
+        as3.metric(
+            "Active Bet Score",
+            f"{abs_val:.3f}" if abs_val is not None else "N/A",
+            help="Composite score = (TE/Volatility) × (1−R²). "
+                 "> 0.30 = highly active | 0.15–0.30 = moderate | < 0.15 = closet indexer risk.",
+        )
+
+        # Interpretation badge
+        if abs_val is not None:
+            if abs_val >= 0.30:
+                st.success(f"✅ **Highly Active Fund** (Score {abs_val:.3f} ≥ 0.30) — "
+                           "portfolio is genuinely differentiated from benchmark.")
+            elif abs_val >= 0.15:
+                st.info(f"ℹ️ **Moderately Active Fund** (Score {abs_val:.3f}) — "
+                        "some active bets but significant benchmark overlap.")
+            else:
+                st.warning(f"⚠️ **Closet Indexer Risk** (Score {abs_val:.3f} < 0.15) — "
+                           "fund behaves very similarly to its benchmark. "
+                           "Consider whether the active fee is justified.")
+
+        with st.expander("📖 How to interpret Active Share proxies"):
+            st.markdown("""
+            **Why these proxies exist:**
+            True Active Share = Σ|fund weight - benchmark weight| / 2 for every stock.
+            This requires portfolio holdings data (disclosed monthly by SEBI mandate,
+            but not available via mftool's NAV-only API).
+
+            **Tracking Error Proxy:**
+            - Measures how differently the fund's *returns* move vs benchmark
+            - High TE means large day-to-day deviations from benchmark
+            - TE > 8% → Active Share likely > 60% (Cremers & Petajisto 2009)
+            - Limitation: a fund could have high TE from leverage, not true active bets
+
+            **1 − R² Proxy:**
+            - Measures how much of the fund's return *variation* is independent of the benchmark
+            - R² = 0.95 → fund is 95% explained by benchmark → likely closet index fund
+            - (1 − R²) > 0.40 → substantial portion of returns comes from non-benchmark sources
+
+            **Active Bet Score (composite):**
+            - Formula: (TE / Fund Volatility) × (1 − R²)
+            - Captures both dimensions simultaneously
+            - ~0.65–0.75 correlation with true Active Share in academic studies
+            - Not a substitute for true Active Share — use as a screening tool only
+            """)
+
+        st.divider()
+
         # ── Phase B: Momentum ─────────────────────────────────────────────────
         st.subheader("📈 Return Momentum")
         m1, m2, m3, m4, m5 = st.columns(5)
@@ -458,19 +527,7 @@ with tab_factor:
 
         st.divider()
 
-        # ── Charts ────────────────────────────────────────────────────────────
-        ch1, ch2 = st.columns(2, gap="medium")
-        with ch1:
-            st.plotly_chart(
-                plot_factor_loadings({selected_name: factor_metrics}),
-                use_container_width=True,
-            )
-        with ch2:
-            st.plotly_chart(
-                plot_factor_contribution({selected_name: factor_metrics}),
-                use_container_width=True,
-            )
-
+        # ── Rolling 4-Factor Alpha chart (clean line — easy to read) ────────────
         roll_4f = factor_metrics.get("_rolling_alpha_4f")
         if roll_4f is not None:
             st.plotly_chart(

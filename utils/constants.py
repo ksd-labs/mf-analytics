@@ -25,7 +25,7 @@ APP_VERSION: str       = "1.0.0"
 # Bump this string every time new metrics are added to the engine.
 # All session_state analytics cache keys include this value — changing it
 # forces every cached result to be recomputed automatically.
-ANALYTICS_VERSION: str = "phase_c"
+ANALYTICS_VERSION: str = "phase_c2"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FINANCIAL CONSTANTS
@@ -381,4 +381,8 @@ METRIC_LABELS: Dict[str, str] = {
     "contrib_hml":     "Value Contribution (%)",
     "contrib_wml":     "Momentum Contribution (%)",
     "contrib_alpha":   "Pure Alpha Contribution (%)",
+    # Active Share Proxies
+    "active_share_proxy_te": "Active Share Proxy (TE)",
+    "active_share_proxy_r2": "Active Share Proxy (1-R²)",
+    "active_bet_score":      "Active Bet Score",
 }

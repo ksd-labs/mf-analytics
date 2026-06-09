@@ -74,13 +74,13 @@ def plot_nav_history(
             first_valid = nav.iloc[0]
             if first_valid <= 0:
                 continue
-            y_values = (nav / first_valid) * 100
-            y_label = "Value (rebased to 100)"
+            y_values = (nav / first_valid - 1) * 100   # % return from start
+            y_label = "Return from Start Date (%)"
             hover = (
                 "<b>%{fullData.name}</b><br>"
                 "Date: %{x|%d %b %Y}<br>"
-                "Rebased Value: %{y:.2f}<br>"
-                f"(Base = {nav.index[0].strftime('%d %b %Y')})"
+                "Return: %{y:.2f}%<br>"
+                f"(from {nav.index[0].strftime('%d %b %Y')})"
                 "<extra></extra>"
             )
         else:
@@ -110,7 +110,7 @@ def plot_nav_history(
             fund_name = list(valid.keys())[0]
             title = f"NAV History — {fund_name}"
         elif normalize:
-            title = "NAV Comparison (Rebased to 100)"
+            title = "Return Comparison (% from Start Date)"
         else:
             title = "NAV History"
 
@@ -123,6 +123,17 @@ def plot_nav_history(
             hovermode = "x unified",
         )
     )
+
+    # Zero reference line for % return charts
+    if normalize:
+        fig.add_hline(
+            y=0, line_dash="dot",
+            line_color="rgba(255,255,255,0.25)", line_width=1.2,
+            annotation_text="0%", annotation_position="right",
+            annotation_font_size=10,
+            annotation_font_color="rgba(200,200,200,0.5)",
+        )
+        fig.update_yaxes(ticksuffix="%")
 
     # ── Range selector buttons ─────────────────────────────────────────────────
     fig.update_xaxes(

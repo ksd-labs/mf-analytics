@@ -52,6 +52,7 @@ from analytics.alpha             import calc_all_alpha
 from analytics.momentum          import calc_all_momentum
 from analytics.alpha_persistence import calc_all_alpha_persistence
 from analytics.factor_model      import calc_all_factor_model
+from analytics.alpha             import calc_all_active_share_proxies
 from analytics.quartile       import build_full_quartile_table
 from utils.constants          import DEFAULT_RISK_FREE_RATE, MAR
 from utils.validators         import check_nav_series
@@ -122,8 +123,12 @@ def compute_fund_metrics(
     # Phase B fields
     empty_result["_benchmark_returns"] = None
     # Phase C fields
-    empty_result["_rolling_alpha_4f"] = None
+    empty_result["_rolling_alpha_4f"]  = None
     empty_result["_factor_names_used"] = []
+    # Active Share proxy fields
+    empty_result["active_share_proxy_te"] = None
+    empty_result["active_share_proxy_r2"] = None
+    empty_result["active_bet_score"]      = None
 
     # ── Step 1: Process NAV ───────────────────────────────────────────────────
     if nav_df is None:
@@ -266,6 +271,16 @@ def compute_fund_metrics(
             # Remove non-scalar keys before updating
             factor_metrics.pop("n_factors", None)
             result.update(factor_metrics)
+
+    # ── Step 15: Active Share Proxies ─────────────────────────────────────────
+    # Needs: tracking_error (Step 11), r_squared (Step 11 or 14), annualized_volatility (Step 5)
+    r2_for_proxy = result.get("r_squared_4f") or result.get("r_squared")
+    active_proxies = calc_all_active_share_proxies(
+        tracking_error        = result.get("tracking_error"),
+        r_squared             = r2_for_proxy,
+        annualized_volatility = result.get("annualized_volatility"),
+    )
+    result.update(active_proxies)
 
     return result
 
@@ -484,4 +499,6 @@ _ALL_METRIC_KEYS: List[str] = [
     "beta_smb", "beta_hml", "beta_wml", "r_squared_4f",
     "contrib_market", "contrib_smb", "contrib_hml",
     "contrib_wml", "contrib_alpha",
+    # Active Share Proxies
+    "active_share_proxy_te", "active_share_proxy_r2", "active_bet_score",
 ]
