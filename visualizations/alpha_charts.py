@@ -3,18 +3,13 @@ visualizations/alpha_charts.py
 ================================
 Alpha generation charts — benchmark-relative visualizations.
 
-Charts:
-    1. Excess Return Chart    — fund vs benchmark NAV (normalised, same canvas)
-    2. Rolling Alpha Chart    — Jensen's alpha over time (persistence view)
-    3. Capture Ratio Chart    — up-capture vs down-capture scatter per category
-    4. Alpha Metrics Bar      — all alpha metrics side-by-side for comparison
+plot_fund_vs_benchmark: Updated to show % returns from period start (not rebased 100).
 """
 
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-from typing import Dict, Optional, List
+from typing import Dict, Optional
 from visualizations._theme import (
     base_layout, empty_figure, get_color,
     UP_COLOR, DOWN_COLOR, NEUTRAL_COLOR,
@@ -22,121 +17,137 @@ from visualizations._theme import (
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CHART 1 — FUND vs BENCHMARK NAV (normalised)
+# CHART 1 — FUND vs BENCHMARK  (% return from period start)
 # ─────────────────────────────────────────────────────────────────────────────
+
+PERIOD_MAP = {
+    "1M": 1, "3M": 3, "6M": 6,
+    "1Y": 12, "3Y": 36, "5Y": 60, "All": None,
+}
+
 
 def plot_fund_vs_benchmark(
     fund_nav:       pd.Series,
     benchmark_nav:  pd.Series,
     fund_name:      str,
     benchmark_name: str,
-    height:         int = 420,
+    period_label:   str = "All",
+    height:         int = 440,
 ) -> go.Figure:
     """
-    Overlay fund and benchmark NAV on the same chart, both rebased to 100.
-
-    The gap between the two lines IS the fund's alpha visually.
-    When the fund line is above the benchmark line, the fund is outperforming.
+    Fund vs Benchmark — both lines start at 0% at the beginning of the
+    selected period. Gap between lines = alpha visually.
 
     Args:
         fund_nav:       Clean NAV series for the fund
-        benchmark_nav:  Clean NAV series for the benchmark index fund
+        benchmark_nav:  Clean NAV series for the benchmark
         fund_name:      Fund display name
         benchmark_name: Benchmark display name (e.g. "Nifty 100 TRI")
+        period_label:   "1M","3M","6M","1Y","3Y","5Y","All"
         height:         Chart height in pixels
 
     Returns:
-        go.Figure with two overlaid normalised NAV lines + shaded gap area.
+        go.Figure — both lines start at 0%, shaded gap area.
     """
     if fund_nav is None or benchmark_nav is None:
         return empty_figure("Fund or benchmark NAV not available")
 
-    # Align to common dates
+    # Common date range
     common = fund_nav.index.intersection(benchmark_nav.index)
-    if len(common) < 30:
-        return empty_figure("Insufficient overlapping history between fund and benchmark")
+    if len(common) < 10:
+        return empty_figure("Insufficient overlapping history")
 
     f = fund_nav.reindex(common)
     b = benchmark_nav.reindex(common)
 
-    # Rebase to 100 at common start
-    f_norm = (f / f.iloc[0]) * 100
-    b_norm = (b / b.iloc[0]) * 100
+    # Slice to period
+    period_months = PERIOD_MAP.get(period_label)
+    if period_months is not None:
+        end   = f.index[-1]
+        start = end - pd.DateOffset(months=period_months)
+        f = f[f.index >= start]
+        b = b[b.index >= start]
+        if len(f) < 5:
+            f = fund_nav.reindex(common)
+            b = benchmark_nav.reindex(common)
+
+    # Common start after slicing
+    cs = max(f.index[0], b.index[0])
+    f  = f[f.index >= cs]
+    b  = b[b.index >= cs]
+
+    # % return from common start
+    f_pct = (f / f.iloc[0] - 1) * 100
+    b_pct = (b / b.iloc[0] - 1) * 100
 
     fig = go.Figure()
 
-    # Shaded area showing outperformance / underperformance
-    fig.add_trace(go.Scatter(
-        x=f_norm.index, y=f_norm.values,
-        name=fund_name, mode="lines",
-        line=dict(color="#2196F3", width=2),
-        fill=None,
-        hovertemplate=(
-            f"<b>{fund_name}</b><br>"
-            "Date: %{x|%d %b %Y}<br>"
-            "Value: %{y:.2f}<extra></extra>"
-        ),
-    ))
+    # Shaded area between lines (fund - benchmark)
+    diff = f_pct.values - b_pct.reindex(f_pct.index).values
 
+    # Benchmark line
     fig.add_trace(go.Scatter(
-        x=b_norm.index, y=b_norm.values,
+        x=b_pct.index, y=b_pct.values,
         name=benchmark_name,
         mode="lines",
-        line=dict(color="#FF9800", width=2, dash="dot"),
-        fill="tonexty",
-        fillcolor="rgba(33,150,243,0.07)",
+        line=dict(color="#FF9800", width=1.8, dash="dot"),
         hovertemplate=(
             f"<b>{benchmark_name}</b><br>"
             "Date: %{x|%d %b %Y}<br>"
-            "Value: %{y:.2f}<extra></extra>"
+            "Return: %{y:+.2f}%<extra></extra>"
         ),
     ))
 
-    # Outperformance annotation
-    final_diff = float(f_norm.iloc[-1] - b_norm.iloc[-1])
-    color = UP_COLOR if final_diff >= 0 else DOWN_COLOR
-    sign  = "+" if final_diff >= 0 else ""
-
-    fig.add_annotation(
-        text=f"<b>{sign}{final_diff:.1f} pts vs benchmark</b>",
-        xref="paper", yref="paper",
-        x=0.99, y=0.99,
-        showarrow=False,
-        xanchor="right",
-        font=dict(size=12, color=color),
-        bgcolor="rgba(22,27,40,0.85)",
-        borderpad=4,
-    )
-
-    fig.update_layout(
-        base_layout(
-            title=f"Fund vs Benchmark — {fund_name}",
-            x_title="Date",
-            y_title="Value (Rebased to 100)",
-            height=height,
-            hovermode="x unified",
-        )
-    )
-
-    fig.update_xaxes(
-        rangeselector=dict(
-            bgcolor="rgba(22,27,40,0.9)",
-            activecolor="#2196F3",
-            font=dict(color="#E0E0E0", size=11),
-            buttons=[
-                dict(count=1,  label="1Y", step="year",  stepmode="backward"),
-                dict(count=3,  label="3Y", step="year",  stepmode="backward"),
-                dict(count=5,  label="5Y", step="year",  stepmode="backward"),
-                dict(step="all", label="All"),
-            ],
+    # Fund line — filled to benchmark
+    fig.add_trace(go.Scatter(
+        x=f_pct.index, y=f_pct.values,
+        name=fund_name,
+        mode="lines",
+        line=dict(color="#2196F3", width=2),
+        fill="tonexty",
+        fillcolor="rgba(33,150,243,0.08)",
+        hovertemplate=(
+            f"<b>{fund_name}</b><br>"
+            "Date: %{x|%d %b %Y}<br>"
+            "Return: %{y:+.2f}%<extra></extra>"
         ),
+    ))
+
+    # Zero baseline
+    fig.add_hline(
+        y=0, line_dash="dot",
+        line_color="rgba(255,255,255,0.30)", line_width=1.2,
+        annotation_text="0%", annotation_position="right",
+        annotation_font_size=10,
+        annotation_font_color="rgba(200,200,200,0.6)",
     )
+
+    # Outperformance annotation
+    final_diff = float(f_pct.iloc[-1] - b_pct.reindex(f_pct.index).iloc[-1])
+    col  = UP_COLOR if final_diff >= 0 else DOWN_COLOR
+    sign = "+" if final_diff >= 0 else ""
+    fig.add_annotation(
+        text=f"<b>{sign}{final_diff:.1f}% vs benchmark</b>",
+        xref="paper", yref="paper", x=0.99, y=0.99,
+        showarrow=False, xanchor="right",
+        font=dict(size=12, color=col),
+        bgcolor="rgba(22,27,40,0.85)", borderpad=4,
+    )
+
+    fig.update_layout(base_layout(
+        title=f"Fund vs Benchmark — {period_label}",
+        x_title="Date",
+        y_title=f"Return from {cs.strftime('%d %b %Y')} (%)",
+        height=height, hovermode="x unified",
+    ))
+    fig.update_yaxes(ticksuffix="%", zeroline=True,
+                     zerolinecolor="rgba(255,255,255,0.30)", zerolinewidth=1.2)
 
     return fig
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CHART 2 — ROLLING ALPHA (PERSISTENCE)
+# CHART 2 — ROLLING ALPHA
 # ─────────────────────────────────────────────────────────────────────────────
 
 def plot_rolling_alpha(
@@ -144,66 +155,34 @@ def plot_rolling_alpha(
     window_label:       str = "1-Year",
     height:             int = 400,
 ) -> go.Figure:
-    """
-    Rolling Jensen's Alpha over time — shows whether alpha is persistent.
-
-    A fund with a consistently positive line has sustained manager skill.
-    A fund that dips frequently below zero generates sporadic or no alpha.
-
-    Args:
-        rolling_alpha_dict: {fund_name: rolling_alpha_series}
-                            rolling_alpha_series = output of calc_rolling_alpha()
-        window_label:       Display label for the window size
-        height:             Chart height
-
-    Returns:
-        go.Figure with rolling alpha time series + zero reference line.
-    """
-    valid = {k: v for k, v in rolling_alpha_dict.items() if v is not None and len(v) > 0}
+    valid = {k: v for k, v in rolling_alpha_dict.items()
+             if v is not None and len(v) > 0}
     if not valid:
-        return empty_figure("Insufficient data for rolling alpha (requires 2+ years of overlapping history)")
+        return empty_figure("Rolling alpha requires 2+ years of overlapping history")
 
     fig = go.Figure()
-
     for i, (name, series) in enumerate(valid.items()):
-        pct = series * 100    # Convert to percentage
-        color = get_color(i)
-
+        pct = (series * 100).dropna()
         fig.add_trace(go.Scatter(
-            x=pct.index, y=pct.values,
-            name=name, mode="lines",
-            line=dict(color=color, width=1.8),
+            x=pct.index, y=pct.values, name=name,
+            mode="lines", line=dict(color=get_color(i), width=1.8),
             hovertemplate=(
-                f"<b>{name}</b><br>"
-                "Date: %{x|%d %b %Y}<br>"
-                f"{window_label} Rolling Alpha: %{{y:.2f}}%"
-                "<extra></extra>"
+                f"<b>{name}</b><br>Date: %{{x|%d %b %Y}}<br>"
+                f"{window_label} Rolling Alpha: %{{y:.2f}}%<extra></extra>"
             ),
         ))
 
-    # Zero line — alpha above here means manager is adding value
-    fig.add_hline(
-        y=0,
-        line_dash="dash",
-        line_color="rgba(255,152,0,0.6)",
-        line_width=1.5,
-        annotation_text="0% Alpha",
-        annotation_position="right",
-        annotation_font_size=10,
-        annotation_font_color=NEUTRAL_COLOR,
-    )
+    fig.add_hline(y=0, line_dash="dash",
+                  line_color="rgba(255,152,0,0.6)", line_width=1.5,
+                  annotation_text="0% Alpha", annotation_position="right",
+                  annotation_font_color=NEUTRAL_COLOR, annotation_font_size=10)
 
-    fig.update_layout(
-        base_layout(
-            title=f"{window_label} Rolling Jensen's Alpha",
-            x_title="Date (end of rolling window)",
-            y_title="Annualized Alpha (%)",
-            height=height,
-            hovermode="x unified",
-        )
-    )
+    fig.update_layout(base_layout(
+        title=f"{window_label} Rolling Jensen's Alpha",
+        x_title="Date", y_title="Annualized Alpha (%)",
+        height=height, hovermode="x unified",
+    ))
     fig.update_yaxes(ticksuffix="%")
-
     return fig
 
 
@@ -212,217 +191,130 @@ def plot_rolling_alpha(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def plot_capture_scatter(
-    full_df:        pd.DataFrame,
-    category:       str,
-    height:         int = 500,
+    full_df:  pd.DataFrame,
+    category: str,
+    height:   int = 500,
 ) -> go.Figure:
-    """
-    Up-Capture vs Down-Capture scatter plot — the alpha quadrant chart.
-
-    Quadrants:
-        Top-left  (high up, low down) → IDEAL: captures gains, avoids losses
-        Top-right (high up, high down)→ Aggressive: needs bull market to shine
-        Bottom-left (low up, low down)→ Defensive: won't lose much but won't gain
-        Bottom-right(low up, high down)→ WORST: loses more than it gains
-
-    Args:
-        full_df:  Full metrics + quartile DataFrame (from compute_category_quartiles)
-                  Must have 'up_capture' and 'down_capture' columns.
-        category: Category name for the title.
-        height:   Chart height.
-
-    Returns:
-        go.Figure with capture ratio scatter.
-    """
     required = ["up_capture", "down_capture"]
     for col in required:
         if col not in full_df.columns:
-            return empty_figure("Capture ratio data not available — run analytics first")
+            return empty_figure("Capture ratio data not available")
 
     plot_df = full_df[required].dropna()
     if plot_df.empty:
-        return empty_figure("No capture ratio data available")
+        return empty_figure("No capture ratio data")
 
-    x_vals = plot_df["down_capture"]     # X = down-capture (lower = better)
-    y_vals = plot_df["up_capture"]       # Y = up-capture (higher = better)
+    x_vals = plot_df["down_capture"]
+    y_vals = plot_df["up_capture"]
     names  = [n[:38] + "…" if len(n) > 38 else n for n in plot_df.index]
 
-    # Colour by capture_ratio quartile if available
-    cap_q_col = "capture_ratio_quartile"
     from utils.constants import QUARTILE_COLORS
+    cap_q = "capture_ratio_quartile"
     colors = [
-        QUARTILE_COLORS.get(str(full_df.loc[n, cap_q_col]), "#2196F3")
-        if cap_q_col in full_df.columns and n in full_df.index else "#2196F3"
+        QUARTILE_COLORS.get(str(full_df.loc[n, cap_q]), "#2196F3")
+        if cap_q in full_df.columns and n in full_df.index else "#2196F3"
         for n in plot_df.index
     ]
 
-    fig = go.Figure()
-
-    # ── Quadrant shading ─────────────────────────────────────────────────────
-    x_mid = 100.0   # 100% = neutral capture
-    y_mid = 100.0
-
-    quad_style = dict(type="rect", xref="x", yref="y",
-                      line=dict(width=0))
-
-    x_min = max(float(x_vals.min()) * 0.92, 40)
-    x_max = float(x_vals.max()) * 1.08
-    y_min = max(float(y_vals.min()) * 0.92, 40)
-    y_max = float(y_vals.max()) * 1.08
-
-    # Top-left (ideal) — green tint
-    fig.add_shape(**quad_style, x0=x_min, x1=x_mid, y0=y_mid, y1=y_max,
-                  fillcolor="rgba(76,175,80,0.06)")
-    # Bottom-right (worst) — red tint
-    fig.add_shape(**quad_style, x0=x_mid, x1=x_max, y0=y_min, y1=y_mid,
-                  fillcolor="rgba(244,67,54,0.06)")
-    # Remaining two quadrants — subtle neutral
-    fig.add_shape(**quad_style, x0=x_min, x1=x_mid, y0=y_min, y1=y_mid,
-                  fillcolor="rgba(255,255,255,0.02)")
-    fig.add_shape(**quad_style, x0=x_mid, x1=x_max, y0=y_mid, y1=y_max,
-                  fillcolor="rgba(255,255,255,0.02)")
-
-    # Cross-hair at 100/100
-    fig.add_hline(y=100, line_dash="dot",
-                  line_color="rgba(255,255,255,0.15)", line_width=1)
-    fig.add_vline(x=100, line_dash="dot",
-                  line_color="rgba(255,255,255,0.15)", line_width=1)
-
-    # ── Data points ──────────────────────────────────────────────────────────
-    cap_ratios = (
-        [full_df.loc[n, "capture_ratio"] for n in plot_df.index]
-        if "capture_ratio" in full_df.columns
-        else [None] * len(plot_df)
-    )
+    cap_ratios = [
+        full_df.loc[n, "capture_ratio"] if "capture_ratio" in full_df.columns
+        and n in full_df.index else None
+        for n in plot_df.index
+    ]
 
     hover = [
-        f"<b>{n}</b><br>"
-        f"Up-Capture: {float(y_vals.iloc[i]):.1f}%<br>"
+        f"<b>{n}</b><br>Up-Capture: {float(y_vals.iloc[i]):.1f}%<br>"
         f"Down-Capture: {float(x_vals.iloc[i]):.1f}%<br>"
         f"Capture Ratio: {f'{cap_ratios[i]:.3f}' if cap_ratios[i] else 'N/A'}"
         "<extra></extra>"
         for i, n in enumerate(plot_df.index)
     ]
 
+    fig = go.Figure()
+
+    x_mid, y_mid = 100.0, 100.0
+    x_min = max(float(x_vals.min()) * 0.92, 40)
+    x_max = float(x_vals.max()) * 1.08
+    y_min = max(float(y_vals.min()) * 0.92, 40)
+    y_max = float(y_vals.max()) * 1.08
+
+    qs = dict(type="rect", xref="x", yref="y", line=dict(width=0))
+    fig.add_shape(**qs, x0=x_min, x1=x_mid, y0=y_mid, y1=y_max, fillcolor="rgba(76,175,80,0.06)")
+    fig.add_shape(**qs, x0=x_mid, x1=x_max, y0=y_min, y1=y_mid, fillcolor="rgba(244,67,54,0.06)")
+    fig.add_shape(**qs, x0=x_min, x1=x_mid, y0=y_min, y1=y_mid, fillcolor="rgba(255,255,255,0.02)")
+    fig.add_shape(**qs, x0=x_mid, x1=x_max, y0=y_mid, y1=y_max, fillcolor="rgba(255,255,255,0.02)")
+
+    fig.add_hline(y=100, line_dash="dot", line_color="rgba(255,255,255,0.15)", line_width=1)
+    fig.add_vline(x=100, line_dash="dot", line_color="rgba(255,255,255,0.15)", line_width=1)
+
     fig.add_trace(go.Scatter(
-        x=x_vals, y=y_vals,
-        mode="markers+text",
+        x=x_vals, y=y_vals, mode="markers+text",
         marker=dict(size=11, color=colors,
-                    line=dict(color="rgba(255,255,255,0.3)", width=1),
-                    opacity=0.88),
-        text=names,
-        textposition="top center",
+                    line=dict(color="rgba(255,255,255,0.3)", width=1), opacity=0.88),
+        text=names, textposition="top center",
         textfont=dict(size=8, color="#C0C0C0"),
-        hovertemplate=hover,
-        showlegend=False,
+        hovertemplate=hover, showlegend=False,
     ))
 
-    # ── Quadrant labels ───────────────────────────────────────────────────────
     _ql = dict(showarrow=False, font=dict(size=8, color="rgba(200,200,200,0.25)"))
-    fig.add_annotation(text="IDEAL ✓", x=x_min*1.02, y=y_max*0.98,
-                       xanchor="left", **_ql)
-    fig.add_annotation(text="WORST ✗", x=x_max*0.98, y=y_min*1.02,
-                       xanchor="right", **_ql)
-    fig.add_annotation(text="DEFENSIVE", x=x_min*1.02, y=y_min*1.02,
-                       xanchor="left", **_ql)
-    fig.add_annotation(text="AGGRESSIVE", x=x_max*0.98, y=y_max*0.98,
-                       xanchor="right", **_ql)
+    fig.add_annotation(text="IDEAL ✓", x=x_min*1.02, y=y_max*0.98, xanchor="left", **_ql)
+    fig.add_annotation(text="WORST ✗", x=x_max*0.98, y=y_min*1.02, xanchor="right", **_ql)
 
-    fig.update_layout(
-        base_layout(
-            title=f"Capture Ratio Map — {category}",
-            x_title="Down-Capture (%) — Lower = better downside protection →",
-            y_title="Up-Capture (%) — Higher = better upside participation ↑",
-            height=height,
-            hovermode="closest",
-        )
-    )
+    fig.update_layout(base_layout(
+        title=f"Capture Ratio Map — {category}",
+        x_title="Down-Capture (%) — Lower = better →",
+        y_title="Up-Capture (%) — Higher = better ↑",
+        height=height, hovermode="closest",
+    ))
     fig.update_xaxes(ticksuffix="%")
     fig.update_yaxes(ticksuffix="%")
-
     return fig
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CHART 4 — ALPHA METRICS COMPARISON BAR
+# CHART 4 — ALPHA COMPARISON BAR
 # ─────────────────────────────────────────────────────────────────────────────
 
 def plot_alpha_comparison(
     fund_metrics_dict: Dict[str, Dict],
     height:            int = 420,
 ) -> go.Figure:
-    """
-    Grouped bar chart comparing key alpha metrics across multiple funds.
-
-    Shows: Jensen's Alpha, Information Ratio, Excess Return, Capture Ratio
-    side-by-side for each fund.
-
-    Args:
-        fund_metrics_dict: {fund_name: metrics_dict}
-                           metrics_dict must contain alpha metric keys.
-        height:            Chart height.
-
-    Returns:
-        go.Figure with grouped bars.
-    """
     if not fund_metrics_dict:
         return empty_figure("No fund metrics provided")
 
-    METRICS_TO_SHOW = [
-        ("jensens_alpha",    "Jensen's Alpha",    True,  100),   # multiply by 100 → %
+    SHOW = [
+        ("jensens_alpha",    "Jensen's Alpha",    True,  100),
         ("information_ratio","Information Ratio", False, 1),
         ("excess_return",    "Excess Return",     True,  100),
         ("capture_ratio",    "Capture Ratio",     False, 1),
     ]
 
     fig = go.Figure()
-
     for i, (name, metrics) in enumerate(fund_metrics_dict.items()):
         if not metrics.get("is_valid"):
             continue
-
-        values = []
-        labels = []
-        for key, label, is_pct, multiplier in METRICS_TO_SHOW:
+        values, labels = [], []
+        for key, label, is_pct, mult in SHOW:
             val = metrics.get(key)
             if val is not None and np.isfinite(val):
-                values.append(float(val) * multiplier)
+                values.append(float(val) * mult)
                 labels.append(label)
             else:
                 values.append(None)
                 labels.append(label)
 
-        bar_colors = [
-            UP_COLOR if (v is not None and v > 0) else DOWN_COLOR
-            for v in values
-        ]
-
         fig.add_trace(go.Bar(
-            x=labels,
-            y=values,
-            name=name[:35],
-            marker_color=get_color(i),
-            opacity=0.82,
+            x=labels, y=values, name=name[:35],
+            marker_color=get_color(i), opacity=0.82,
             hovertemplate=(
-                f"<b>{name[:40]}</b><br>"
-                "Metric: %{x}<br>"
-                "Value: %{y:.3f}"
-                "<extra></extra>"
+                f"<b>{name[:40]}</b><br>%{{x}}: %{{y:.3f}}<extra></extra>"
             ),
         ))
 
     fig.add_hline(y=0, line_dash="dot",
                   line_color="rgba(255,255,255,0.2)", line_width=1)
-
-    fig.update_layout(
-        base_layout(
-            title="Alpha Metrics Comparison",
-            x_title="Metric",
-            y_title="Value",
-            height=height,
-            hovermode="x unified",
-        ),
-        barmode="group",
-    )
-
+    fig.update_layout(base_layout(
+        title="Alpha Metrics Comparison", x_title="Metric",
+        y_title="Value", height=height, hovermode="x unified",
+    ), barmode="group")
     return fig
