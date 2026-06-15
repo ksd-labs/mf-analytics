@@ -10,7 +10,7 @@ Tabs:
   4. 🔁 Consistency     — Rolling returns
   5. 📅 Stability       — Win rate, positive frequency
   6. ⚡ Alpha           — Jensen's Alpha, Capture Ratio, IR
-  7. 📊 Absolute Returns — 1M / 3M / 6M point-in-time returns  ← NEW
+  7. 📊 Absolute Returns — 1M / 3M / 6M point-in-time returns
   8. 📊 Momentum        — 12M momentum, Momentum Sharpe
   9. 🔁 Persistence     — Alpha persistence, bull/bear alpha
  10. 🔬 Factor Model    — 4-Factor alpha, factor loadings
@@ -157,7 +157,14 @@ if run_btn or st.session_state.get(analytics_key):
             return "N/A"
         return str(val)
 
-    def _ranking_table(metric_key, label, kind, ascending=False):
+    def _ranking_table(metric_key, label, kind, ascending=False, key_suffix=""):
+        """
+        Render a ranked table for `metric_key`.
+
+        key_suffix must be unique whenever the same metric_key appears more
+        than once on the page (e.g. best vs worst, or repeated across tabs).
+        The download button key becomes f"dl_{metric_key}{key_suffix}".
+        """
         if metric_key not in full_df.columns:
             st.caption(f"_{label} — insufficient data_"); return
 
@@ -188,7 +195,8 @@ if run_btn or st.session_state.get(analytics_key):
             f"⬇️ Download {label} Ranking (CSV)",
             data=csv,
             file_name=f"{category.replace(' ','_')}_{metric_key}_ranking.csv",
-            mime="text/csv", key=f"dl_{metric_key}",
+            mime="text/csv",
+            key=f"dl_{metric_key}{key_suffix}",   # unique per call site
         )
 
     # ── TABS ──────────────────────────────────────────────────────────────────
@@ -311,7 +319,7 @@ if run_btn or st.session_state.get(analytics_key):
                 st.markdown("**Lowest — Down-Capture**")
                 _ranking_table("down_capture", "Down-Capture %", "num", ascending=True)
 
-    # ── Tab 7 (NEW): Absolute Returns 1M / 3M / 6M ───────────────────────────
+    # ── Tab 7: Absolute Returns 1M / 3M / 6M ─────────────────────────────────
     with tab_abs:
         st.subheader("📊 Absolute Returns Rankings")
         st.caption(
@@ -319,31 +327,35 @@ if run_btn or st.session_state.get(analytics_key):
             "Sorted highest to lowest. These are trailing returns, not annualised."
         )
 
+        # Best performers — key_suffix="_abs_best" makes these keys unique
         c1, c2, c3 = st.columns(3, gap="large")
         with c1:
             st.markdown("**Top — 1 Month Return**")
-            _ranking_table("momentum_1m", "1M Return", "pct", ascending=False)
+            _ranking_table("momentum_1m", "1M Return", "pct", ascending=False, key_suffix="_abs_best")
         with c2:
             st.markdown("**Top — 3 Month Return**")
-            _ranking_table("momentum_3m", "3M Return", "pct", ascending=False)
+            _ranking_table("momentum_3m", "3M Return", "pct", ascending=False, key_suffix="_abs_best")
         with c3:
             st.markdown("**Top — 6 Month Return**")
-            _ranking_table("momentum_6m", "6M Return", "pct", ascending=False)
+            _ranking_table("momentum_6m", "6M Return", "pct", ascending=False, key_suffix="_abs_best")
 
         st.divider()
         st.caption("Bottom performers (funds with worst recent returns):")
+
+        # Worst performers — key_suffix="_abs_worst" keeps these unique too
         c4, c5, c6 = st.columns(3, gap="large")
         with c4:
             st.markdown("**Worst — 1 Month Return**")
-            _ranking_table("momentum_1m", "1M Return", "pct", ascending=True)
+            _ranking_table("momentum_1m", "1M Return", "pct", ascending=True, key_suffix="_abs_worst")
         with c5:
             st.markdown("**Worst — 3 Month Return**")
-            _ranking_table("momentum_3m", "3M Return", "pct", ascending=True)
+            _ranking_table("momentum_3m", "3M Return", "pct", ascending=True, key_suffix="_abs_worst")
         with c6:
             st.markdown("**Worst — 6 Month Return**")
-            _ranking_table("momentum_6m", "6M Return", "pct", ascending=True)
+            _ranking_table("momentum_6m", "6M Return", "pct", ascending=True, key_suffix="_abs_worst")
 
     # ── Tab 8: Momentum ───────────────────────────────────────────────────────
+    # momentum_3m and momentum_6m also appear here — use key_suffix="_mom"
     with tab7:
         st.subheader("📊 Momentum Rankings")
         st.caption("Point-in-time returns over 3, 6, and 12 months. Higher = stronger recent momentum.")
@@ -361,7 +373,7 @@ if run_btn or st.session_state.get(analytics_key):
             _ranking_table("momentum_12m", "12M Return", "pct", ascending=False)
         with c2:
             st.markdown("**Top — 6M Return**")
-            _ranking_table("momentum_6m", "6M Return", "pct", ascending=False)
+            _ranking_table("momentum_6m", "6M Return", "pct", ascending=False, key_suffix="_mom")
         with c3:
             st.markdown("**Top — Momentum Sharpe**")
             _ranking_table("momentum_sharpe", "Mom. Sharpe", "ratio", ascending=False)
@@ -370,7 +382,7 @@ if run_btn or st.session_state.get(analytics_key):
         c4, c5 = st.columns(2, gap="large")
         with c4:
             st.markdown("**Top — 3M Return**")
-            _ranking_table("momentum_3m", "3M Return", "pct", ascending=False)
+            _ranking_table("momentum_3m", "3M Return", "pct", ascending=False, key_suffix="_mom")
         with c5:
             st.markdown("**Top — Alpha Momentum**")
             _ranking_table("alpha_momentum", "Alpha Mom.", "pct", ascending=False)
