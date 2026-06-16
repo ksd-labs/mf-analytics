@@ -1,30 +1,29 @@
 """
 analytics/engine.py
 ===================
-The analytics orchestrator — the single entry point for all metric calculations.
+The analytics orchestrator — single entry point for all metric calculations.
 
 Pages NEVER call individual analytics functions directly. Instead they call:
-
     compute_fund_metrics(nav_df, rf_rate)      → metrics dict for one fund
-    compute_category_metrics(fund_nav_dict, rf_rate) → metrics for all funds in category
+    compute_category_metrics(fund_nav_dict, ..) → metrics for all funds in category
     compute_category_quartiles(fund_metrics)   → adds quartile labels
 
-This design means:
-    - Pages contain zero mathematical logic
-    - All metric computation is testable in isolation
-    - The engine is the only place that knows the computation order
-    - Caching can be applied at the engine level
+Computation order:
+    1.  Process raw NAV → clean nav, daily returns, log returns, monthly returns
+    2.  Performance (CAGR)
+    3.  Risk (Drawdown)
+    4.  Volatility
+    5.  Risk-Adjusted (Sharpe, Sortino, Calmar)
+    6.  Consistency (Rolling Returns)
+    7.  Distribution (Skewness, Kurtosis)
+    8.  Stability (Win Rate)
+    9.  Persistence (% positive rolling periods, streaks)
+    10. Alpha (Benchmark-Relative) — Phase A
+    11. Momentum — Phase B
+    12. Alpha Persistence + Bull/Bear — Phase B
+    13. Factor Model (Fama-French-Carhart 4-Factor) — Phase C
 
-Computation order (matters for Calmar ratio):
-    1. Process raw NAV → clean nav, daily returns, log returns, monthly returns
-    2. Performance (CAGR) — needed by Calmar
-    3. Risk (Drawdown) — needed by Calmar
-    4. Volatility
-    5. Risk-Adjusted (Sharpe, Sortino, Calmar)
-    6. Consistency (Rolling Returns) — also needed by Persistence
-    7. Distribution (Skewness, Kurtosis)
-    8. Stability (Win Rate)
-    9. Persistence (% positive rolling periods, streaks)
+Note (Phase D): Step 14 (Active Share Proxies) removed.
 """
 
 import streamlit as st
@@ -52,7 +51,6 @@ from analytics.alpha             import calc_all_alpha
 from analytics.momentum          import calc_all_momentum
 from analytics.alpha_persistence import calc_all_alpha_persistence
 from analytics.factor_model      import calc_all_factor_model
-from analytics.alpha             import calc_all_active_share_proxies
 from analytics.quartile       import build_full_quartile_table
 from utils.constants          import DEFAULT_RISK_FREE_RATE, MAR
 from utils.validators         import check_nav_series
@@ -65,70 +63,27 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def compute_fund_metrics(
-    nav_df: Optional[pd.DataFrame],
-    rf_rate: float = DEFAULT_RISK_FREE_RATE,
-    fund_name: str = "",
-    benchmark_nav_df: Optional[pd.DataFrame] = None,
-    benchmark_name: str = "",
+    nav_df:            Optional[pd.DataFrame],
+    rf_rate:           float = DEFAULT_RISK_FREE_RATE,
+    fund_name:         str   = "",
+    benchmark_nav_df:  Optional[pd.DataFrame] = None,
+    benchmark_name:    str   = "",
     factor_returns_df: Optional[pd.DataFrame] = None,
 ) -> Dict:
-    """
-    Compute all quantitative metrics for a single mutual fund.
-
-    This is the primary engine function. It processes the raw NAV data,
-    runs all analytics modules in the correct order, and returns a
-    comprehensive dict of results.
-
-    Args:
-        nav_df:    Raw NAV DataFrame from fund_loader.get_nav_history()
-                   (DatetimeIndex, 'nav' column as float)
-        rf_rate:   Annual risk-free rate for Sharpe/Sortino (default 6.5%)
-        fund_name: Display name (for logging and summary)
-
-    Returns:
-        Dict containing:
-          ── Processed series (for charts) ─────────────────────────────────
-          'nav'              → clean pd.Series of NAV values
-          'returns'          → daily simple returns pd.Series
-          'log_returns'      → daily log returns pd.Series
-          'monthly_returns'  → monthly simple returns pd.Series
-          'drawdown_series'  → drawdown pd.Series (always ≤ 0)
-          '_series_1y'       → 1Y rolling return pd.Series
-          '_series_3y'       → 3Y rolling return pd.Series
-
-          ── Data quality ──────────────────────────────────────────────────
-          'summary'          → dict from get_series_summary()
-          'is_valid'         → bool (False = insufficient data for any metric)
-          'warnings'         → List[str]
-
-          ── Scalar metrics (float or None) ────────────────────────────────
-          See METRIC_LABELS in utils/constants.py for the full list.
-          Every key from that dict is present here.
-
-        On total failure, returns a dict with is_valid=False and empty metrics.
-    """
     empty_result = {
         "nav": None, "returns": None, "log_returns": None,
         "monthly_returns": None, "drawdown_series": None,
         "_series_1y": None, "_series_3y": None,
         "summary": {}, "is_valid": False, "warnings": [],
     }
-    # Add all scalar metrics as None
     for key in _ALL_METRIC_KEYS:
         empty_result[key] = None
-    # Alpha metric fields
-    empty_result["_rolling_alpha"]   = None
-    empty_result["_benchmark_nav"]   = None
-    empty_result["_benchmark_name"]  = ""
-    # Phase B fields
+    empty_result["_rolling_alpha"]     = None
+    empty_result["_benchmark_nav"]     = None
+    empty_result["_benchmark_name"]    = ""
     empty_result["_benchmark_returns"] = None
-    # Phase C fields
     empty_result["_rolling_alpha_4f"]  = None
     empty_result["_factor_names_used"] = []
-    # Active Share proxy fields
-    empty_result["active_share_proxy_te"] = None
-    empty_result["active_share_proxy_r2"] = None
-    empty_result["active_bet_score"]      = None
 
     # ── Step 1: Process NAV ───────────────────────────────────────────────────
     if nav_df is None:
@@ -137,7 +92,7 @@ def compute_fund_metrics(
 
     nav = process_nav(nav_df)
     if nav is None:
-        empty_result["warnings"] = [f"NAV processing failed for {fund_name} — data may be corrupt."]
+        empty_result["warnings"] = [f"NAV processing failed for {fund_name}."]
         return empty_result
 
     is_valid, nav_warnings = check_nav_series(nav)
@@ -156,7 +111,7 @@ def compute_fund_metrics(
         "returns":         returns,
         "log_returns":     log_returns,
         "monthly_returns": monthly_returns,
-        "drawdown_series": None,   # Will be filled by risk module
+        "drawdown_series": None,
         "_series_1y":      None,
         "_series_3y":      None,
         "summary":         summary,
@@ -165,8 +120,7 @@ def compute_fund_metrics(
     }
 
     # ── Step 3: Performance (CAGR) ────────────────────────────────────────────
-    perf = calc_all_cagr(nav)
-    result.update(perf)
+    result.update(calc_all_cagr(nav))
 
     # ── Step 4: Risk (Drawdown) ───────────────────────────────────────────────
     risk = calc_all_risk(nav)
@@ -174,19 +128,16 @@ def compute_fund_metrics(
     result.update(risk)
 
     # ── Step 5: Volatility ────────────────────────────────────────────────────
-    vol = calc_all_volatility(returns, mar=MAR)
-    result.update(vol)
+    result.update(calc_all_volatility(returns, mar=MAR))
 
     # ── Step 6: Risk-Adjusted ─────────────────────────────────────────────────
-    # For Calmar: prefer 3Y CAGR; fall back to inception CAGR
     cagr_for_calmar = result.get("cagr_3y") or result.get("cagr_inception")
-    radj = calc_all_risk_adjusted(
-        returns=returns,
-        cagr_for_calmar=cagr_for_calmar,
-        max_drawdown=result.get("max_drawdown"),
-        rf_rate=rf_rate,
-    )
-    result.update(radj)
+    result.update(calc_all_risk_adjusted(
+        returns         = returns,
+        cagr_for_calmar = cagr_for_calmar,
+        max_drawdown    = result.get("max_drawdown"),
+        rf_rate         = rf_rate,
+    ))
 
     # ── Step 7: Consistency (Rolling Returns) ─────────────────────────────────
     consistency = calc_all_consistency(nav)
@@ -195,22 +146,19 @@ def compute_fund_metrics(
     result.update(consistency)
 
     # ── Step 8: Distribution ─────────────────────────────────────────────────
-    dist = calc_all_distribution(log_returns)
-    result.update(dist)
+    result.update(calc_all_distribution(log_returns))
 
     # ── Step 9: Stability ─────────────────────────────────────────────────────
-    stab = calc_all_stability(returns, monthly_returns)
-    result.update(stab)
+    result.update(calc_all_stability(returns, monthly_returns))
 
     # ── Step 10: Persistence ──────────────────────────────────────────────────
-    pers = calc_all_persistence(
-        returns=returns,
-        rolling_1y=result.get("_series_1y"),
-        rolling_3y=result.get("_series_3y"),
-    )
-    result.update(pers)
+    result.update(calc_all_persistence(
+        returns    = returns,
+        rolling_1y = result.get("_series_1y"),
+        rolling_3y = result.get("_series_3y"),
+    ))
 
-    # ── Step 11: Alpha (Benchmark-Relative) — only if benchmark provided ──────
+    # ── Step 11: Alpha (Benchmark-Relative) ───────────────────────────────────
     result["_benchmark_nav"]  = None
     result["_benchmark_name"] = benchmark_name
 
@@ -227,32 +175,28 @@ def compute_fund_metrics(
                 f_returns_b = compute_daily_returns(f_aligned)
 
                 alpha_metrics = calc_all_alpha(f_returns_b, b_returns, rf_rate)
-                result["_rolling_alpha"]  = alpha_metrics.pop("_rolling_alpha", None)
-                result["_benchmark_nav"]  = benchmark_nav
-
-                # Store aligned benchmark returns for Phase B
+                result["_rolling_alpha"]     = alpha_metrics.pop("_rolling_alpha", None)
+                result["_benchmark_nav"]     = benchmark_nav
                 result["_benchmark_returns"] = b_returns
                 result.update(alpha_metrics)
 
     # ── Step 12: Momentum ─────────────────────────────────────────────────────
     bm_returns_for_momentum = result.get("_benchmark_returns")
-    momentum_metrics = calc_all_momentum(
-        nav          = result.get("nav"),
-        fund_returns = result.get("returns"),
+    result.update(calc_all_momentum(
+        nav               = result.get("nav"),
+        fund_returns      = result.get("returns"),
         benchmark_returns = bm_returns_for_momentum,
-        rf_rate      = rf_rate,
-    )
-    result.update(momentum_metrics)
+        rf_rate           = rf_rate,
+    ))
 
     # ── Step 13: Alpha Persistence + Bull/Bear ────────────────────────────────
-    persistence_metrics = calc_all_alpha_persistence(
+    result.update(calc_all_alpha_persistence(
         rolling_alpha     = result.get("_rolling_alpha"),
         fund_returns      = result.get("returns"),
         benchmark_returns = bm_returns_for_momentum,
         nav               = result.get("nav"),
         rf_rate           = rf_rate,
-    )
-    result.update(persistence_metrics)
+    ))
 
     # ── Step 14: Factor Model (Fama-French-Carhart 4-Factor) ──────────────────
     result["_rolling_alpha_4f"]  = None
@@ -268,19 +212,8 @@ def compute_fund_metrics(
             )
             result["_rolling_alpha_4f"]  = factor_metrics.pop("_rolling_alpha_4f", None)
             result["_factor_names_used"] = factor_metrics.pop("factors_used", [])
-            # Remove non-scalar keys before updating
             factor_metrics.pop("n_factors", None)
             result.update(factor_metrics)
-
-    # ── Step 15: Active Share Proxies ─────────────────────────────────────────
-    # Needs: tracking_error (Step 11), r_squared (Step 11 or 14), annualized_volatility (Step 5)
-    r2_for_proxy = result.get("r_squared_4f") or result.get("r_squared")
-    active_proxies = calc_all_active_share_proxies(
-        tracking_error        = result.get("tracking_error"),
-        r_squared             = r2_for_proxy,
-        annualized_volatility = result.get("annualized_volatility"),
-    )
-    result.update(active_proxies)
 
     return result
 
@@ -290,57 +223,35 @@ def compute_fund_metrics(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def compute_category_metrics(
-    fund_nav_dict:    Dict[str, Optional[pd.DataFrame]],
-    rf_rate:          float = DEFAULT_RISK_FREE_RATE,
-    progress_bar=None,
-    benchmark_nav_df: Optional[pd.DataFrame] = None,
-    benchmark_name:   str = "",
+    fund_nav_dict:     Dict[str, Optional[pd.DataFrame]],
+    rf_rate:           float = DEFAULT_RISK_FREE_RATE,
+    progress_bar       = None,
+    benchmark_nav_df:  Optional[pd.DataFrame] = None,
+    benchmark_name:    str   = "",
     factor_returns_df: Optional[pd.DataFrame] = None,
 ) -> Dict[str, Dict]:
-    """
-    Compute metrics for all funds in a category.
-
-    The benchmark NAV is loaded ONCE here at category level and reused
-    for every fund — this is the correct architecture. Individual funds
-    should never each reload the same benchmark independently.
-
-    Args:
-        fund_nav_dict:    {fund_name: nav_df_or_None, ...}
-        rf_rate:          Annual risk-free rate for ratio calculations.
-        progress_bar:     Optional Streamlit progress bar object.
-        benchmark_nav_df: Optional benchmark NAV DataFrame. When provided,
-                          alpha metrics (Jensen's alpha, capture ratio, etc.)
-                          are computed for every fund automatically.
-        benchmark_name:   Display name of the benchmark (e.g. "Nifty 100 TRI").
-
-    Returns:
-        {fund_name: metrics_dict, ...}
-        where metrics_dict is the output of compute_fund_metrics().
-    """
     results: Dict[str, Dict] = {}
     total = len(fund_nav_dict)
 
     for i, (fund_name, nav_df) in enumerate(fund_nav_dict.items()):
         if progress_bar is not None:
             try:
-                pct = (i + 1) / max(total, 1)
                 progress_bar.progress(
-                    pct,
+                    (i + 1) / max(total, 1),
                     text=f"Computing metrics: {fund_name[:50]} ({i+1}/{total})",
                 )
             except Exception:
                 pass
 
         try:
-            metrics = compute_fund_metrics(
+            results[fund_name] = compute_fund_metrics(
                 nav_df,
                 rf_rate           = rf_rate,
                 fund_name         = fund_name,
                 benchmark_nav_df  = benchmark_nav_df,
                 benchmark_name    = benchmark_name,
-                factor_returns_df = factor_returns_df,  # same factors for every fund
+                factor_returns_df = factor_returns_df,
             )
-            results[fund_name] = metrics
         except Exception as e:
             logger.error(f"engine: compute_fund_metrics failed for '{fund_name}': {e}")
             results[fund_name] = {"is_valid": False, "warnings": [str(e)]}
@@ -351,45 +262,18 @@ def compute_category_metrics(
 def compute_category_quartiles(
     fund_metrics: Dict[str, Dict],
 ) -> pd.DataFrame:
-    """
-    Build the quartile rankings table for a full category.
-
-    Extracts scalar metrics from each fund's metrics dict, builds a wide
-    DataFrame, and appends quartile label columns.
-
-    Args:
-        fund_metrics: Output of compute_category_metrics()
-
-    Returns:
-        DataFrame where:
-            - Rows = fund names
-            - Columns = metric values + '{metric}_quartile' columns
-        Ready for display in Streamlit st.dataframe() or export to CSV.
-    """
     return build_full_quartile_table(fund_metrics)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STREAMLIT CACHED WRAPPERS
 # ─────────────────────────────────────────────────────────────────────────────
-# These are called from pages. st.cache_data memoises based on arguments.
-# nav_df is not directly cacheable, so we cache at the scheme_code level.
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_cached_fund_metrics(
     scheme_code: str,
-    rf_rate: float = DEFAULT_RISK_FREE_RATE,
+    rf_rate:     float = DEFAULT_RISK_FREE_RATE,
 ) -> Dict:
-    """
-    Cached wrapper for compute_fund_metrics. Called from Fund Analytics page.
-
-    Args:
-        scheme_code: AMFI scheme code (used as cache key)
-        rf_rate:     Annual risk-free rate
-
-    Returns:
-        Metrics dict for the fund (same as compute_fund_metrics output).
-    """
     from data.fund_loader import get_nav_history
     nav_df = get_nav_history(scheme_code)
     return compute_fund_metrics(nav_df, rf_rate=rf_rate, fund_name=scheme_code)
@@ -399,25 +283,8 @@ def get_cached_fund_metrics(
 def get_cached_category_metrics(
     category:  str,
     rf_rate:   float = DEFAULT_RISK_FREE_RATE,
-    plan_type: str = "Direct",
+    plan_type: str   = "Direct",
 ) -> Dict[str, Dict]:
-    """
-    Cached wrapper for computing metrics for ALL funds in a category.
-
-    Automatically loads the benchmark for the category and passes it
-    to every fund computation — alpha metrics are included in every result.
-
-    Benchmark is loaded ONCE per category call (not once per fund),
-    making category-wide alpha computation efficient.
-
-    Args:
-        category:  Category name (e.g. "Large Cap")
-        rf_rate:   Annual risk-free rate
-        plan_type: "Direct" or "Regular"
-
-    Returns:
-        {fund_name: metrics_dict} for all funds — including alpha metrics.
-    """
     from data.fund_loader      import get_schemes_for_category, load_navs_for_funds
     from data.benchmark_loader import get_benchmark_nav, get_benchmark_info
 
@@ -425,31 +292,18 @@ def get_cached_category_metrics(
     if not fund_list:
         return {}
 
-    # Load benchmark ONCE for the whole category
     bm_info   = get_benchmark_info(category)
     bm_nav_df = get_benchmark_nav(category) if bm_info["available"] else None
     bm_name   = bm_info["display_name"]
 
-    if bm_nav_df is not None:
-        logger.info(f"Benchmark loaded for {category}: {bm_name}")
-    else:
-        logger.warning(f"No benchmark available for {category} — alpha metrics skipped")
-
-    # Load factor returns ONCE for the whole category (Phase C)
     from data.factor_loader import get_factor_returns
-    factor_df, factor_proxy_names = get_factor_returns(rf_rate=rf_rate)
-    if factor_df is not None:
-        logger.info(f"Factor returns loaded: {list(factor_df.columns)}, {len(factor_df)} days")
-    else:
-        logger.warning("Factor returns not available — factor model skipped")
+    factor_df, _ = get_factor_returns(rf_rate=rf_rate)
 
-    # Load NAVs (each individual NAV is cached by get_nav_history)
     nav_dict = {
         fund["name"]: load_navs_for_funds([fund]).get(fund["code"])
         for fund in fund_list
     }
 
-    # Pass benchmark AND factor returns to every fund
     return compute_category_metrics(
         nav_dict,
         rf_rate           = rf_rate,
@@ -470,7 +324,7 @@ _ALL_METRIC_KEYS: List[str] = [
     "annualized_volatility", "downside_volatility",
     # Risk
     "max_drawdown", "avg_drawdown", "drawdown_duration",
-    # Risk-adjusted
+    # Risk-Adjusted
     "sharpe", "sortino", "calmar",
     # Consistency
     "avg_rolling_1y", "median_rolling_1y", "std_rolling_1y",
@@ -484,21 +338,19 @@ _ALL_METRIC_KEYS: List[str] = [
     # Persistence
     "pct_positive_rolling_1y", "pct_positive_rolling_3y",
     "max_consec_positive", "max_consec_negative",
-    # Alpha Generation
+    # Alpha Generation (Phase A)
     "excess_return", "beta", "r_squared", "tracking_error",
     "information_ratio", "jensens_alpha", "alpha_tstat",
     "up_capture", "down_capture", "capture_ratio",
-    # Phase B — Momentum
-    "momentum_3m", "momentum_6m", "momentum_12m",
+    # Momentum (Phase B)
+    "momentum_1m", "momentum_3m", "momentum_6m", "momentum_12m",
     "alpha_momentum", "momentum_sharpe",
-    # Phase B — Alpha Persistence & Regime
+    # Alpha Persistence & Regime (Phase B)
     "alpha_persistence", "bull_alpha", "bear_alpha",
     "alpha_regime_ratio", "drawdown_recovery_rate",
-    # Phase C — Factor Model
+    # Factor Model (Phase C)
     "alpha_4f", "alpha_4f_tstat", "beta_market_4f",
     "beta_smb", "beta_hml", "beta_wml", "r_squared_4f",
     "contrib_market", "contrib_smb", "contrib_hml",
     "contrib_wml", "contrib_alpha",
-    # Active Share Proxies
-    "active_share_proxy_te", "active_share_proxy_r2", "active_bet_score",
 ]

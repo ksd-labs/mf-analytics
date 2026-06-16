@@ -4,16 +4,18 @@ pages/5_Rankings.py
 Rankings — Category-wise Ranking Tables
 
 Tabs:
-  1. 📈 Performance     — CAGR rankings
-  2. ⚖️ Risk-Adjusted   — Sharpe, Sortino, Calmar
-  3. ⚠️ Risk            — Drawdown, Volatility
-  4. 🔁 Consistency     — Rolling returns
-  5. 📅 Stability       — Win rate, positive frequency
-  6. ⚡ Alpha           — Jensen's Alpha, Capture Ratio, IR
-  7. 📊 Absolute Returns — 1M / 3M / 6M point-in-time returns
-  8. 📊 Momentum        — 12M momentum, Momentum Sharpe
-  9. 🔁 Persistence     — Alpha persistence, bull/bear alpha
- 10. 🔬 Factor Model    — 4-Factor alpha, factor loadings
+  1.  📈 Performance       — CAGR rankings
+  2.  ⚖️ Risk-Adjusted     — Sharpe, Sortino, Calmar
+  3.  ⚠️ Risk              — Drawdown, Volatility
+  4.  🔁 Consistency       — Rolling returns
+  5.  📅 Stability         — Win rate, positive frequency
+  6.  ⚡ Alpha             — Jensen's Alpha, Capture Ratio, IR
+  7.  📊 Absolute Returns  — 1M / 3M / 6M point-in-time returns
+  8.  📊 Momentum          — 12M momentum, Momentum Sharpe
+  9.  🔁 Persistence       — Alpha persistence, bull/bear alpha
+  10. 🔬 Factor Model      — 4-Factor alpha, factor loadings
+  11. 🗂️ Quartile View     — Full heatmap + scatter + metrics table
+                             (replaces Category Explorer — Phase D)
 """
 
 import streamlit as st
@@ -29,13 +31,13 @@ from utils.session         import (
     rankings_done_key, category_full_df_key, category_fund_metrics_key,
     render_refresh_button,
 )
-from visualizations.alpha_charts   import plot_capture_scatter
+from visualizations.alpha_charts    import plot_capture_scatter
 from visualizations.momentum_charts import (
     plot_momentum_bars, plot_bull_bear_alpha, plot_momentum_heatmap,
 )
-from visualizations.factor_charts   import (
-    plot_rolling_alpha_4f,
-)
+from visualizations.factor_charts   import plot_rolling_alpha_4f
+from visualizations.scatter_plots   import plot_risk_return_scatter, plot_vol_cagr_scatter
+from visualizations.heatmaps        import plot_quartile_heatmap, plot_metric_heatmap
 
 st.set_page_config(page_title="Rankings — MF Analytics", page_icon="🏆", layout="wide")
 
@@ -50,7 +52,9 @@ with st.sidebar:
     )
     st.session_state["selected_category"] = category
 
-    top_n = st.slider("Top N funds to show", 5, 20, 10, 1)
+    st.caption("Funds to show per table")
+    _top_n_choice = st.radio("", ["10", "20", "All"], horizontal=True, label_visibility="collapsed")
+    top_n = 9999 if _top_n_choice == "All" else int(_top_n_choice)
 
     plan_type = st.radio(
         "Plan Universe", ["Direct", "Regular"],
@@ -160,10 +164,8 @@ if run_btn or st.session_state.get(analytics_key):
     def _ranking_table(metric_key, label, kind, ascending=False, key_suffix=""):
         """
         Render a ranked table for `metric_key`.
-
         key_suffix must be unique whenever the same metric_key appears more
-        than once on the page (e.g. best vs worst, or repeated across tabs).
-        The download button key becomes f"dl_{metric_key}{key_suffix}".
+        than once on the page (best vs worst, or repeated across tabs).
         """
         if metric_key not in full_df.columns:
             st.caption(f"_{label} — insufficient data_"); return
@@ -172,8 +174,8 @@ if run_btn or st.session_state.get(analytics_key):
         if col.empty:
             st.caption(f"_{label} — no valid values_"); return
 
-        sorted_df  = full_df.sort_values(metric_key, ascending=ascending).head(top_n)
-        q_col      = f"{metric_key}_quartile"
+        sorted_df = full_df.sort_values(metric_key, ascending=ascending).head(top_n)
+        q_col     = f"{metric_key}_quartile"
 
         rows = []
         for rank, (fund_name, row) in enumerate(sorted_df.iterrows(), start=1):
@@ -196,12 +198,13 @@ if run_btn or st.session_state.get(analytics_key):
             data=csv,
             file_name=f"{category.replace(' ','_')}_{metric_key}_ranking.csv",
             mime="text/csv",
-            key=f"dl_{metric_key}{key_suffix}",   # unique per call site
+            key=f"dl_{metric_key}{key_suffix}",
         )
 
     # ── TABS ──────────────────────────────────────────────────────────────────
     (tab1, tab2, tab3, tab4, tab5,
-     tab6, tab_abs, tab7, tab8, tab9) = st.tabs([
+     tab6, tab_abs, tab7, tab8, tab9,
+     tab_quartile) = st.tabs([
         "📈 Performance",
         "⚖️ Risk-Adjusted",
         "⚠️ Risk",
@@ -212,6 +215,7 @@ if run_btn or st.session_state.get(analytics_key):
         "📊 Momentum",
         "🔁 Persistence",
         "🔬 Factor Model",
+        "🗂️ Quartile View",
     ])
 
     # ── Tab 1: Performance ────────────────────────────────────────────────────
@@ -324,10 +328,9 @@ if run_btn or st.session_state.get(analytics_key):
         st.subheader("📊 Absolute Returns Rankings")
         st.caption(
             "Point-in-time returns over the last 1, 3, and 6 months. "
-            "Sorted highest to lowest. These are trailing returns, not annualised."
+            "These are trailing returns, not annualised."
         )
 
-        # Best performers — key_suffix="_abs_best" makes these keys unique
         c1, c2, c3 = st.columns(3, gap="large")
         with c1:
             st.markdown("**Top — 1 Month Return**")
@@ -341,8 +344,6 @@ if run_btn or st.session_state.get(analytics_key):
 
         st.divider()
         st.caption("Bottom performers (funds with worst recent returns):")
-
-        # Worst performers — key_suffix="_abs_worst" keeps these unique too
         c4, c5, c6 = st.columns(3, gap="large")
         with c4:
             st.markdown("**Worst — 1 Month Return**")
@@ -355,10 +356,9 @@ if run_btn or st.session_state.get(analytics_key):
             _ranking_table("momentum_6m", "6M Return", "pct", ascending=True, key_suffix="_abs_worst")
 
     # ── Tab 8: Momentum ───────────────────────────────────────────────────────
-    # momentum_3m and momentum_6m also appear here — use key_suffix="_mom"
     with tab7:
         st.subheader("📊 Momentum Rankings")
-        st.caption("Point-in-time returns over 3, 6, and 12 months. Higher = stronger recent momentum.")
+        st.caption("Higher = stronger recent momentum.")
 
         has_mom = ("momentum_12m" in full_df.columns and
                    full_df["momentum_12m"].notna().any())
@@ -439,7 +439,7 @@ if run_btn or st.session_state.get(analytics_key):
 
         if not has_factor:
             from data.factor_loader import get_factor_availability, FACTOR_DISPLAY_NAMES
-            avail  = get_factor_availability()
+            avail   = get_factor_availability()
             n_avail = sum(avail.values())
             if n_avail == 0:
                 st.warning("No factor proxy index funds found. Check connectivity.")
@@ -473,3 +473,101 @@ if run_btn or st.session_state.get(analytics_key):
             with c6:
                 st.markdown("**Momentum Loading (WML β)**")
                 _ranking_table("beta_wml", "WML β", "ratio", ascending=False)
+
+    # ── Tab 11: Quartile View ─────────────────────────────────────────────────
+    # Replaces pages/2_Category_Explorer.py (removed in Phase D).
+    # Shows all funds × all metrics with Q1–Q4 colour coding, plus
+    # scatter plots and a downloadable key-metrics table.
+    with tab_quartile:
+        st.subheader("🗂️ Quartile View — All Funds · All Metrics")
+        st.caption(
+            "**Q1** = Best 25% in category (green)  |  "
+            "**Q2** = Next 25%  |  "
+            "**Q3** = Next 25%  |  "
+            "**Q4** = Worst 25% (red)  |  "
+            "**N/A** = Insufficient history for this metric"
+        )
+
+        # ── Scatter plots ─────────────────────────────────────────────────────
+        sc1, sc2 = st.columns(2, gap="medium")
+        with sc1:
+            try:
+                st.plotly_chart(
+                    plot_risk_return_scatter(full_df),
+                    use_container_width=True,
+                )
+            except Exception as e:
+                st.caption(f"_Risk-Return scatter unavailable: {e}_")
+        with sc2:
+            try:
+                st.plotly_chart(
+                    plot_vol_cagr_scatter(full_df),
+                    use_container_width=True,
+                )
+            except Exception as e:
+                st.caption(f"_Vol-CAGR scatter unavailable: {e}_")
+
+        st.divider()
+
+        # ── Quartile heatmap — the primary "show all quartiles" view ──────────
+        st.subheader("Q1–Q4 Heatmap — Every Fund, Every Metric")
+        try:
+            heatmap_height = max(420, 100 + 38 * len(full_df))
+            st.plotly_chart(
+                plot_quartile_heatmap(full_df, height=heatmap_height),
+                use_container_width=True,
+            )
+        except Exception as e:
+            st.warning(f"Quartile heatmap unavailable: {e}")
+
+        st.divider()
+
+        # ── Key metrics table with CSV download ───────────────────────────────
+        st.subheader("Key Metrics Table")
+        st.caption("Summary of the most actionable metrics for each fund in the category.")
+
+        _KEY_COLS = {
+            "cagr_1y":               "1Y CAGR",
+            "cagr_3y":               "3Y CAGR",
+            "cagr_5y":               "5Y CAGR",
+            "annualized_volatility": "Ann. Vol",
+            "max_drawdown":          "Max DD",
+            "sharpe":                "Sharpe",
+            "sortino":               "Sortino",
+            "jensens_alpha":         "Alpha",
+            "capture_ratio":         "Capture Ratio",
+            "win_rate":              "Win Rate",
+        }
+
+        rows = []
+        for fund_name, m in fund_metrics.items():
+            if not m.get("is_valid"):
+                continue
+            row = {"Fund": fund_name}
+            for key, col_label in _KEY_COLS.items():
+                val = m.get(key)
+                if val is None or (isinstance(val, float) and np.isnan(val)):
+                    row[col_label] = "N/A"
+                elif key in {"sharpe", "sortino", "capture_ratio"}:
+                    row[col_label] = f"{val:.3f}"
+                else:
+                    row[col_label] = fmt_pct(val)
+            rows.append(row)
+
+        if rows:
+            table_df = pd.DataFrame(rows).set_index("Fund")
+            st.dataframe(
+                table_df,
+                use_container_width=True,
+                height=min(600, 42 + 35 * len(table_df)),
+            )
+            csv = table_df.reset_index().to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "⬇️ Download Key Metrics (CSV)",
+                data=csv,
+                file_name=f"{category.replace(' ','_')}_key_metrics.csv",
+                mime="text/csv",
+                key="dl_quartile_view_metrics",
+            )
+        else:
+            st.warning("No valid fund data to display.")

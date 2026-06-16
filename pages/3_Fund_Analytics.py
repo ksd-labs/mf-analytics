@@ -1,8 +1,7 @@
 """
 pages/3_Fund_Analytics.py
 ==========================
-Fund Analytics — Deep Dive with Trailing Returns period selector
-in the Alpha Analytics tab (Fund vs Benchmark chart).
+Fund Analytics — Deep Dive
 """
 
 import streamlit as st
@@ -181,7 +180,7 @@ with tab_alpha:
         alpha_cache_key = _alpha_key(selected_code, rf_pct, category)
         if alpha_cache_key not in st.session_state:
             with st.spinner("Loading benchmark NAV and computing alpha metrics…"):
-                bm_nav_df = get_benchmark_nav(category)
+                bm_nav_df    = get_benchmark_nav(category)
                 nav_df_fresh = get_nav_history(selected_code)
                 full_metrics = compute_fund_metrics(
                     nav_df_fresh, rf_rate=rf_rate,
@@ -218,7 +217,7 @@ with tab_alpha:
             key        = "alpha_period",
         )
 
-        bm_nav_obj = full_metrics.get("_benchmark_nav")
+        bm_nav_obj   = full_metrics.get("_benchmark_nav")
         fund_nav_obj = full_metrics.get("nav")
 
         if fund_nav_obj is not None and bm_nav_obj is not None:
@@ -231,16 +230,14 @@ with tab_alpha:
                 ),
                 use_container_width=True,
             )
-        else:
-            # Fallback: trailing returns with just the fund
-            if fund_nav_obj is not None:
-                st.plotly_chart(
-                    plot_trailing_returns(
-                        {selected_name: fund_nav_obj},
-                        period_label=period_alpha,
-                    ),
-                    use_container_width=True,
-                )
+        elif fund_nav_obj is not None:
+            st.plotly_chart(
+                plot_trailing_returns(
+                    {selected_name: fund_nav_obj},
+                    period_label=period_alpha,
+                ),
+                use_container_width=True,
+            )
 
         # Rolling alpha
         roll_alpha = full_metrics.get("_rolling_alpha")
@@ -259,45 +256,18 @@ with tab_alpha:
 
         st.divider()
 
-        # Active Share Proxies
-        st.subheader("📐 Active Share Proxies")
-        st.caption(
-            "True Active Share requires portfolio holdings data (not available via mftool). "
-            "These NAV-based proxies estimate how actively managed the fund is vs its benchmark."
-        )
-        as1, as2, as3 = st.columns(3)
-        te_val  = full_metrics.get("active_share_proxy_te")
-        r2_val  = full_metrics.get("active_share_proxy_r2")
-        abs_val = full_metrics.get("active_bet_score")
-        as1.metric("TE Proxy",        fmt_pct(te_val)  if te_val  is not None else "N/A",
-                   help="TE > 8% → likely high Active Share")
-        as2.metric("1 − R² Proxy",    f"{r2_val:.3f}"  if r2_val  is not None else "N/A",
-                   help="> 0.40 → substantial active positioning")
-        as3.metric("Active Bet Score", f"{abs_val:.3f}" if abs_val is not None else "N/A",
-                   help="> 0.30 = highly active | < 0.15 = closet indexer risk")
-
-        if abs_val is not None:
-            if abs_val >= 0.30:
-                st.success(f"✅ **Highly Active Fund** (Score {abs_val:.3f} ≥ 0.30)")
-            elif abs_val >= 0.15:
-                st.info(f"ℹ️ **Moderately Active Fund** (Score {abs_val:.3f})")
-            else:
-                st.warning(f"⚠️ **Closet Indexer Risk** (Score {abs_val:.3f} < 0.15)")
-
-        st.divider()
-
-        # Momentum & Persistence
+        # ── Momentum & Persistence ────────────────────────────────────────────
         st.subheader("📈 Return Momentum")
         m1, m2, m3, m4, m5 = st.columns(5)
         def _mkpi(col, label, val, pct=True):
             if val is None or (isinstance(val, float) and np.isnan(val)):
                 col.metric(label, "N/A"); return
             col.metric(label, fmt_pct(val) if pct else fmt_ratio(val))
-        _mkpi(m1, "1M Return",      full_metrics.get("momentum_1m"))
-        _mkpi(m2, "3M Return",      full_metrics.get("momentum_3m"))
-        _mkpi(m3, "6M Return",      full_metrics.get("momentum_6m"))
-        _mkpi(m4, "12M Return",     full_metrics.get("momentum_12m"))
-        _mkpi(m5, "Mom. Sharpe",    full_metrics.get("momentum_sharpe"), pct=False)
+        _mkpi(m1, "1M Return",   full_metrics.get("momentum_1m"))
+        _mkpi(m2, "3M Return",   full_metrics.get("momentum_3m"))
+        _mkpi(m3, "6M Return",   full_metrics.get("momentum_6m"))
+        _mkpi(m4, "12M Return",  full_metrics.get("momentum_12m"))
+        _mkpi(m5, "Mom. Sharpe", full_metrics.get("momentum_sharpe"), pct=False)
 
         st.divider()
         st.subheader("🔁 Alpha Persistence")
@@ -325,14 +295,14 @@ with tab_factor:
     st.subheader("🔬 Factor Model (Fama-French-Carhart)")
 
     from data.factor_loader import get_factor_returns, get_factor_availability, FACTOR_DISPLAY_NAMES
-    avail    = get_factor_availability()
-    n_factors= sum(avail.values())
+    avail     = get_factor_availability()
+    n_factors = sum(avail.values())
 
     st.info(
         f"**Model:** {n_factors}-Factor  |  " +
         "  |  ".join([
             f"{'✅' if avail.get(f) else '❌'} {FACTOR_DISPLAY_NAMES.get(f, f)}"
-            for f in ['market','smb','hml','wml']
+            for f in ['market', 'smb', 'hml', 'wml']
         ]),
         icon="📐",
     )
@@ -364,7 +334,7 @@ with tab_factor:
                 col.metric(label, "N/A"); return
             col.metric(label, fmt_pct(val) if pct else fmt_ratio(val))
 
-        _fkpi(f1, "4F Alpha (Ann.)", factor_metrics.get("alpha_4f"),      pct=True)
+        _fkpi(f1, "4F Alpha (Ann.)", factor_metrics.get("alpha_4f"),       pct=True)
         _fkpi(f2, "4F t-Stat",       factor_metrics.get("alpha_4f_tstat"))
         _fkpi(f3, "Market β",        factor_metrics.get("beta_market_4f"))
         _fkpi(f4, "Size β (SMB)",    factor_metrics.get("beta_smb"))
@@ -373,8 +343,8 @@ with tab_factor:
         f6, f7, f8, f9 = st.columns(4)
         _fkpi(f6, "Value β (HML)",    factor_metrics.get("beta_hml"))
         _fkpi(f7, "Momentum β (WML)", factor_metrics.get("beta_wml"))
-        _fkpi(f8, "Pure Alpha",       factor_metrics.get("contrib_alpha"), pct=True)
-        _fkpi(f9, "Market Contrib",   factor_metrics.get("contrib_market"),pct=True)
+        _fkpi(f8, "Pure Alpha",       factor_metrics.get("contrib_alpha"),  pct=True)
+        _fkpi(f9, "Market Contrib",   factor_metrics.get("contrib_market"), pct=True)
 
         roll_4f = factor_metrics.get("_rolling_alpha_4f")
         if roll_4f is not None:
@@ -397,72 +367,73 @@ with tab_metrics:
 
     SECTIONS = {
         "📈 Performance": [
-            ("cagr_1y","1-Year CAGR","pct"),("cagr_3y","3-Year CAGR","pct"),
-            ("cagr_5y","5-Year CAGR","pct"),("cagr_inception","Since Inception CAGR","pct"),
+            ("cagr_1y",        "1-Year CAGR",         "pct"),
+            ("cagr_3y",        "3-Year CAGR",         "pct"),
+            ("cagr_5y",        "5-Year CAGR",         "pct"),
+            ("cagr_inception", "Since Inception CAGR","pct"),
         ],
         "🌊 Volatility": [
-            ("annualized_volatility","Annualized Volatility","pct"),
-            ("downside_volatility","Downside Volatility","pct"),
+            ("annualized_volatility", "Annualized Volatility", "pct"),
+            ("downside_volatility",   "Downside Volatility",   "pct"),
         ],
         "⚠️ Risk": [
-            ("max_drawdown","Maximum Drawdown","pct"),
-            ("avg_drawdown","Average Drawdown","pct"),
-            ("drawdown_duration","Max Drawdown Duration","days"),
+            ("max_drawdown",      "Maximum Drawdown",       "pct"),
+            ("avg_drawdown",      "Average Drawdown",       "pct"),
+            ("drawdown_duration", "Max Drawdown Duration",  "days"),
         ],
         "⚖️ Risk-Adjusted": [
-            ("sharpe","Sharpe Ratio","ratio"),("sortino","Sortino Ratio","ratio"),
-            ("calmar","Calmar Ratio","ratio"),
+            ("sharpe",  "Sharpe Ratio",  "ratio"),
+            ("sortino", "Sortino Ratio", "ratio"),
+            ("calmar",  "Calmar Ratio",  "ratio"),
         ],
         "⚡ Alpha (vs Benchmark)": [
-            ("excess_return","Excess Return (Ann.)","pct"),
-            ("beta","Beta","ratio"),("r_squared","R-Squared","ratio"),
-            ("tracking_error","Tracking Error","pct"),
-            ("information_ratio","Information Ratio","ratio"),
-            ("jensens_alpha","Jensen's Alpha (Ann.)","pct"),
-            ("alpha_tstat","Alpha t-Statistic","ratio"),
-            ("up_capture","Up-Capture Ratio","num"),
-            ("down_capture","Down-Capture Ratio","num"),
-            ("capture_ratio","Capture Ratio","ratio"),
-        ],
-        "📐 Active Share Proxies": [
-            ("active_share_proxy_te","Active Share Proxy (TE)","pct"),
-            ("active_share_proxy_r2","Active Share Proxy (1-R²)","ratio"),
-            ("active_bet_score","Active Bet Score","ratio"),
+            ("excess_return",    "Excess Return (Ann.)",    "pct"),
+            ("beta",             "Beta",                    "ratio"),
+            ("r_squared",        "R-Squared",               "ratio"),
+            ("tracking_error",   "Tracking Error",          "pct"),
+            ("information_ratio","Information Ratio",        "ratio"),
+            ("jensens_alpha",    "Jensen's Alpha (Ann.)",   "pct"),
+            ("alpha_tstat",      "Alpha t-Statistic",       "ratio"),
+            ("up_capture",       "Up-Capture Ratio",        "num"),
+            ("down_capture",     "Down-Capture Ratio",      "num"),
+            ("capture_ratio",    "Capture Ratio",           "ratio"),
         ],
         "📈 Momentum": [
-            ("momentum_1m","1M Return","pct"),("momentum_3m","3M Return","pct"),
-            ("momentum_6m","6M Return","pct"),("momentum_12m","12M Return","pct"),
-            ("alpha_momentum","Alpha Momentum (12M)","pct"),
-            ("momentum_sharpe","Momentum Sharpe","ratio"),
+            ("momentum_1m",   "1M Return",            "pct"),
+            ("momentum_3m",   "3M Return",            "pct"),
+            ("momentum_6m",   "6M Return",            "pct"),
+            ("momentum_12m",  "12M Return",           "pct"),
+            ("alpha_momentum","Alpha Momentum (12M)", "pct"),
+            ("momentum_sharpe","Momentum Sharpe",     "ratio"),
         ],
         "🔁 Alpha Persistence": [
-            ("alpha_persistence","Alpha Persistence Score","pct"),
-            ("bull_alpha","Bull Market Alpha","pct"),
-            ("bear_alpha","Bear Market Alpha","pct"),
-            ("alpha_regime_ratio","Alpha Regime Ratio","ratio"),
+            ("alpha_persistence",     "Alpha Persistence Score", "pct"),
+            ("bull_alpha",            "Bull Market Alpha",       "pct"),
+            ("bear_alpha",            "Bear Market Alpha",       "pct"),
+            ("alpha_regime_ratio",    "Alpha Regime Ratio",      "ratio"),
             ("drawdown_recovery_rate","Drawdown Recovery (days)","days"),
         ],
         "🔬 Factor Model": [
-            ("alpha_4f","4-Factor Alpha (Ann.)","pct"),
-            ("alpha_4f_tstat","4-Factor t-Stat","ratio"),
-            ("beta_market_4f","Market Beta","ratio"),
-            ("beta_smb","Size Loading (SMB)","ratio"),
-            ("beta_hml","Value Loading (HML)","ratio"),
-            ("beta_wml","Momentum Loading (WML)","ratio"),
-            ("r_squared_4f","4-Factor R-Squared","ratio"),
-            ("contrib_alpha","Pure Alpha Contribution","pct"),
+            ("alpha_4f",        "4-Factor Alpha (Ann.)",   "pct"),
+            ("alpha_4f_tstat",  "4-Factor t-Stat",         "ratio"),
+            ("beta_market_4f",  "Market Beta",             "ratio"),
+            ("beta_smb",        "Size Loading (SMB)",      "ratio"),
+            ("beta_hml",        "Value Loading (HML)",     "ratio"),
+            ("beta_wml",        "Momentum Loading (WML)",  "ratio"),
+            ("r_squared_4f",    "4-Factor R-Squared",      "ratio"),
+            ("contrib_alpha",   "Pure Alpha Contribution", "pct"),
         ],
         "🔁 Consistency (1Y Rolling)": [
-            ("avg_rolling_1y","Avg 1Y Rolling","pct"),
-            ("median_rolling_1y","Median 1Y Rolling","pct"),
-            ("std_rolling_1y","Std Dev 1Y Rolling","pct"),
-            ("best_rolling_1y","Best 1Y Rolling","pct"),
-            ("worst_rolling_1y","Worst 1Y Rolling","pct"),
+            ("avg_rolling_1y",    "Avg 1Y Rolling",    "pct"),
+            ("median_rolling_1y", "Median 1Y Rolling", "pct"),
+            ("std_rolling_1y",    "Std Dev 1Y Rolling","pct"),
+            ("best_rolling_1y",   "Best 1Y Rolling",   "pct"),
+            ("worst_rolling_1y",  "Worst 1Y Rolling",  "pct"),
         ],
         "📅 Stability": [
-            ("positive_freq","Positive Day Frequency","pct"),
-            ("negative_freq","Negative Day Frequency","pct"),
-            ("win_rate","Monthly Win Rate","pct"),
+            ("positive_freq", "Positive Day Frequency", "pct"),
+            ("negative_freq", "Negative Day Frequency", "pct"),
+            ("win_rate",      "Monthly Win Rate",        "pct"),
         ],
     }
 
@@ -477,14 +448,16 @@ with tab_metrics:
 
     for section_title, metric_list in SECTIONS.items():
         with st.expander(section_title, expanded=False):
-            rows = [{"Metric": label, "Value": _fmt(metrics.get(key), kind)}
-                    for key, label, kind in metric_list]
+            rows = [
+                {"Metric": label, "Value": _fmt(metrics.get(key), kind)}
+                for key, label, kind in metric_list
+            ]
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 # ── TAB 5: DATA QUALITY ────────────────────────────────────────────────────────
 with tab_quality:
-    nav = metrics.get("nav")
+    nav    = metrics.get("nav")
     report = build_quality_report(selected_name, nav)
 
     q1, q2, q3, q4 = st.columns(4)
@@ -498,8 +471,10 @@ with tab_quality:
     st.subheader("Metric Coverage")
     coverage = report.get("coverage", {})
     cov_rows = [
-        {"Metric": METRIC_LABELS.get(k, k),
-         "Available": "✅ Yes" if v else "❌ No (insufficient history)"}
+        {
+            "Metric":    METRIC_LABELS.get(k, k),
+            "Available": "✅ Yes" if v else "❌ No (insufficient history)",
+        }
         for k, v in coverage.items()
     ]
     yes_n = sum(1 for r in cov_rows if "Yes" in r["Available"])

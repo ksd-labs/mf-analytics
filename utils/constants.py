@@ -2,13 +2,6 @@
 constants.py
 ============
 Central configuration file for the MF Analytics Platform.
-
-All magic numbers, category definitions, keyword mappings, color palettes,
-and data sufficiency thresholds live here. Edit this file to:
-  - Add/remove categories
-  - Change the default risk-free rate
-  - Adjust minimum data requirements
-  - Update keyword mappings as SEBI renames categories
 """
 
 from typing import Dict, List
@@ -17,32 +10,23 @@ from typing import Dict, List
 # APPLICATION METADATA
 # ─────────────────────────────────────────────────────────────────────────────
 
-APP_TITLE: str       = "MF Quantitative Analytics"
-APP_ICON: str        = "📊"
-APP_SUBTITLE: str    = "Institutional-Grade Mutual Fund Analysis · India"
-APP_VERSION: str       = "1.0.0"
+APP_TITLE: str    = "MF Quantitative Analytics"
+APP_ICON: str     = "📊"
+APP_SUBTITLE: str = "Institutional-Grade Mutual Fund Analysis · India"
+APP_VERSION: str  = "1.0.0"
 
 # Bump this string every time new metrics are added to the engine.
 # All session_state analytics cache keys include this value — changing it
 # forces every cached result to be recomputed automatically.
-ANALYTICS_VERSION: str = "phase_c2"
+ANALYTICS_VERSION: str = "phase_d1"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FINANCIAL CONSTANTS
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Approximate Indian 91-day T-bill yield (annualized).
-# This is the default value shown in the sidebar slider.
-# Users can override it interactively.
-DEFAULT_RISK_FREE_RATE: float = 0.065   # 6.5%
-
-# Number of trading days assumed in one year for annualization.
-# Indian equity markets trade ~252 days/year.
-TRADING_DAYS_PER_YEAR: int = 252
-
-# Minimum Acceptable Return used in Sortino / Downside Volatility.
-# Set to 0 → any negative return counts as downside.
-MAR: float = 0.0
+DEFAULT_RISK_FREE_RATE: float = 0.065
+TRADING_DAYS_PER_YEAR: int   = 252
+MAR: float                   = 0.0
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SUPPORTED FUND CATEGORIES
@@ -66,222 +50,121 @@ CATEGORIES: List[str] = [
 # ─────────────────────────────────────────────────────────────────────────────
 # CATEGORY → KEYWORD MAPPING
 # ─────────────────────────────────────────────────────────────────────────────
-# mftool returns full scheme names like:
-#   "Axis Bluechip Fund - Direct Plan - Growth"
-#   "HDFC Mid-Cap Opportunities Fund - Growth"
-# We detect category by scanning the lowercase name for these keywords.
-# Lists are ordered: first match wins, so put MORE SPECIFIC keywords first.
 
 CATEGORY_KEYWORDS: Dict[str, List[str]] = {
     "Large Cap": [
-        "large cap",
-        "bluechip",
-        "blue chip",
-        "large-cap",
-        "largecap",
+        "large cap", "bluechip", "blue chip", "large-cap", "largecap",
     ],
     "Mid Cap": [
-        "mid cap",
-        "midcap",
-        "mid-cap",
+        "mid cap", "midcap", "mid-cap",
     ],
     "Small Cap": [
-        "small cap",
-        "smallcap",
-        "small-cap",
+        "small cap", "smallcap", "small-cap",
     ],
     "Flexi Cap": [
-        "flexi cap",
-        "flexicap",
-        "flexi-cap",
-        "flexible cap",
+        "flexi cap", "flexicap", "flexi-cap", "flexible cap",
     ],
     "Multi Cap": [
-        "multi cap",
-        "multicap",
-        "multi-cap",
+        "multi cap", "multicap", "multi-cap",
     ],
     "ELSS": [
-        "elss",
-        "long term equity",
-        "tax saver",
-        "taxsaver",
-        "tax saving",
-        "tax relief",
+        "elss", "long term equity", "tax saver", "taxsaver",
+        "tax saving", "tax relief",
     ],
     "Value": [
-        "value discovery",
-        "value fund",
-        " value ",          # space-padded to avoid false matches
+        "value discovery", "value fund", " value ",
     ],
     "Contra": [
         "contra",
     ],
     "Focused": [
-        "focused",
-        "focus fund",
-        "focussed",
-        "focus 25",
-        "focus 30",
+        "focused", "focus fund", "focussed", "focus 25", "focus 30",
     ],
     "Aggressive Hybrid": [
-        "aggressive hybrid",
-        "hybrid equity",
-        "equity hybrid",
-        "equity & debt",
-        "equity and debt",
+        "aggressive hybrid", "hybrid equity", "equity hybrid",
+        "equity & debt", "equity and debt",
     ],
     "Balanced Advantage": [
-        "balanced advantage",
-        "dynamic asset allocation",
-        "baf",
-        "dynamic equity",
+        "balanced advantage", "dynamic asset allocation",
+        "baf", "dynamic equity",
     ],
     "Index Funds": [
-        "index fund",
-        "nifty 50 ",            # trailing space avoids "nifty 500"
-        "nifty next 50",
-        "nifty 100 ",
-        "sensex fund",
-        "nifty midcap 150",
-        "nifty smallcap",
+        "index fund", "nifty 50 ", "nifty next 50", "nifty 100 ",
+        "sensex fund", "nifty midcap 150", "nifty smallcap",
     ],
 }
 
-# These strings in a scheme name EXCLUDE it from the Index Funds category
-# (ETFs trade on exchange — they are not open-ended index funds)
-INDEX_EXCLUSIONS: List[str] = [
-    "etf",
-    "exchange traded",
-]
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PLAN / OPTION FILTERS
-# ─────────────────────────────────────────────────────────────────────────────
+INDEX_EXCLUSIONS: List[str] = ["etf", "exchange traded"]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PLAN TYPE SELECTION
 # ─────────────────────────────────────────────────────────────────────────────
-# SEBI mandated Direct/Regular split in 2013. Direct plans have no distributor
-# commission → lower expense ratio → higher returns. Comparing Direct vs
-# Regular of the same fund distorts every metric — always analyse within
-# one universe (Direct-only or Regular-only).
 
-PLAN_TYPES: List[str] = ["Direct", "Regular"]
-
-# Default plan type shown on app startup
-DEFAULT_PLAN_TYPE: str = "Direct"
-
-# Keywords that identify a Direct plan in the scheme name
+PLAN_TYPES: List[str]      = ["Direct", "Regular"]
+DEFAULT_PLAN_TYPE: str     = "Direct"
 DIRECT_KEYWORDS: List[str] = ["direct"]
+REGULAR_KEYWORDS: List[str]= ["regular"]
 
-# Keywords that identify a Regular plan explicitly
-# Note: pre-2013 schemes have neither keyword — treated as Regular
-REGULAR_KEYWORDS: List[str] = ["regular"]
+PREFERRED_OPTIONS: List[str] = ["growth"]
 
-# ─────────────────────────────────────────────────────────────────────────────
-
-# We only want Growth option schemes (not Dividend / IDCW).
-# A scheme name MUST contain at least one of these to pass.
-PREFERRED_OPTIONS: List[str] = [
-    "growth",
-]
-
-# If ANY of these appear in a scheme name, it is excluded.
-# Catches Dividend, IDCW, Payout, Weekly/Monthly Dividend, Bonus options.
 EXCLUDED_PLAN_KEYWORDS: List[str] = [
-    "idcw",
-    "dividend",
-    "bonus",
-    "weekly",
-    "monthly dividend",
-    "quarterly dividend",
-    "annual dividend",
-    "payout",
-    "reinvestment",
-    "segregated",
+    "idcw", "dividend", "bonus", "weekly", "monthly dividend",
+    "quarterly dividend", "annual dividend", "payout",
+    "reinvestment", "segregated",
 ]
 
-# Also exclude these fund structures entirely (they are not comparable to
-# standard open-ended equity/hybrid funds)
 EXCLUDED_STRUCTURE_KEYWORDS: List[str] = [
-    "etf",
-    "exchange traded",
-    "fund of fund",
-    " fof ",
-    "interval fund",
-    "fixed maturity",
-    "fmp",
-    "close ended",
-    "liquid fund",
-    "overnight fund",
-    "arbitrage",
-    "gilt",
-    "debt fund",
+    "etf", "exchange traded", "fund of fund", " fof ", "interval fund",
+    "fixed maturity", "fmp", "close ended", "liquid fund",
+    "overnight fund", "arbitrage", "gilt", "debt fund",
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MINIMUM DATA REQUIREMENTS (calendar days)
 # ─────────────────────────────────────────────────────────────────────────────
-# If a fund's NAV history is shorter than these thresholds,
-# that metric will be reported as N/A instead of potentially misleading.
 
 MIN_DAYS: Dict[str, int] = {
-    "1y_cagr":              365,
-    "3y_cagr":              365 * 3,
-    "5y_cagr":              365 * 5,
-    "inception_cagr":       30,
-    "volatility":           30,
-    "downside_volatility":  30,
-    "max_drawdown":         30,
-    "avg_drawdown":         30,
-    "drawdown_duration":    30,
-    "sharpe":               252,        # need at least 1 year for stable estimate
-    "sortino":              252,
-    "calmar":               252,
-    "rolling_1y":           365 * 2,    # need 2 years to compute 1-year rolling
-    "rolling_3y":           365 * 4,    # need 4 years to compute 3-year rolling
-    "skewness":             30,
-    "kurtosis":             30,
-    "win_rate":             30,
-    "streaks":              30,
+    "1y_cagr":             365,
+    "3y_cagr":             365 * 3,
+    "5y_cagr":             365 * 5,
+    "inception_cagr":      30,
+    "volatility":          30,
+    "downside_volatility": 30,
+    "max_drawdown":        30,
+    "avg_drawdown":        30,
+    "drawdown_duration":   30,
+    "sharpe":              252,
+    "sortino":             252,
+    "calmar":              252,
+    "rolling_1y":          365 * 2,
+    "rolling_3y":          365 * 4,
+    "skewness":            30,
+    "kurtosis":            30,
+    "win_rate":            30,
+    "streaks":             30,
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CHART COLORS
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Ordered list used for multi-fund comparison charts
 CHART_COLORS: List[str] = [
-    "#2196F3",   # Blue
-    "#F44336",   # Red
-    "#4CAF50",   # Green
-    "#FF9800",   # Orange
-    "#9C27B0",   # Purple
-    "#00BCD4",   # Cyan
-    "#FF5722",   # Deep Orange
-    "#607D8B",   # Blue Grey
-    "#E91E63",   # Pink
-    "#009688",   # Teal
-    "#FFC107",   # Amber
-    "#3F51B5",   # Indigo
+    "#2196F3", "#F44336", "#4CAF50", "#FF9800", "#9C27B0",
+    "#00BCD4", "#FF5722", "#607D8B", "#E91E63", "#009688",
+    "#FFC107", "#3F51B5",
 ]
 
-# Quartile color map (used in heatmaps and badges)
-# Q1 = Best, Q4 = Worst
 QUARTILE_COLORS: Dict[str, str] = {
-    "Q1": "#4CAF50",    # Green
-    "Q2": "#8BC34A",    # Light Green
-    "Q3": "#FF9800",    # Orange
-    "Q4": "#F44336",    # Red
-    "N/A": "#9E9E9E",   # Grey — insufficient data
+    "Q1":  "#4CAF50",
+    "Q2":  "#8BC34A",
+    "Q3":  "#FF9800",
+    "Q4":  "#F44336",
+    "N/A": "#9E9E9E",
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # QUARTILE DIRECTION
 # ─────────────────────────────────────────────────────────────────────────────
-# For most metrics: higher = better → Q1 is highest values.
-# For the metrics below: lower = better → Q1 is the LOWEST values.
 
 LOWER_IS_BETTER: List[str] = [
     "annualized_volatility",
@@ -294,15 +177,13 @@ LOWER_IS_BETTER: List[str] = [
     "std_rolling_3y",
     "worst_rolling_1y",
     "worst_rolling_3y",
-    "down_capture",      # lower down-capture = better downside protection
-    "drawdown_recovery_rate",  # faster recovery = better
+    "down_capture",
+    "drawdown_recovery_rate",
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DISPLAY LABELS
 # ─────────────────────────────────────────────────────────────────────────────
-# Human-readable names for each internal metric key.
-# Used in tables, charts, and export headers.
 
 METRIC_LABELS: Dict[str, str] = {
     # Performance
@@ -345,7 +226,7 @@ METRIC_LABELS: Dict[str, str] = {
     "pct_positive_rolling_3y": "% Positive 3Y Rolling Periods",
     "max_consec_positive":     "Max Consecutive Positive Days",
     "max_consec_negative":     "Max Consecutive Negative Days",
-    # ── Alpha Generation ──────────────────────────────────────────────────────
+    # Alpha Generation
     "excess_return":     "Excess Return (Ann.)",
     "beta":              "Beta",
     "r_squared":         "R-Squared",
@@ -356,19 +237,20 @@ METRIC_LABELS: Dict[str, str] = {
     "up_capture":        "Up-Capture Ratio (%)",
     "down_capture":      "Down-Capture Ratio (%)",
     "capture_ratio":     "Capture Ratio",
-    # ── Phase B: Momentum ─────────────────────────────────────────────────────
+    # Momentum
+    "momentum_1m":       "1M Return",
     "momentum_3m":       "3M Momentum",
     "momentum_6m":       "6M Momentum",
     "momentum_12m":      "12M Momentum",
     "alpha_momentum":    "Alpha Momentum (12M)",
     "momentum_sharpe":   "Momentum Sharpe",
-    # ── Phase B: Alpha Persistence & Regime ───────────────────────────────────
+    # Alpha Persistence & Regime
     "alpha_persistence":      "Alpha Persistence Score",
     "bull_alpha":             "Bull Market Alpha",
     "bear_alpha":             "Bear Market Alpha",
     "alpha_regime_ratio":     "Alpha Regime Ratio",
     "drawdown_recovery_rate": "Drawdown Recovery (days)",
-    # ── Phase C: Factor Model ─────────────────────────────────────────────────
+    # Factor Model
     "alpha_4f":        "4-Factor Alpha (Ann.)",
     "alpha_4f_tstat":  "4-Factor Alpha t-Stat",
     "beta_market_4f":  "Market Beta (4F)",
@@ -381,8 +263,4 @@ METRIC_LABELS: Dict[str, str] = {
     "contrib_hml":     "Value Contribution (%)",
     "contrib_wml":     "Momentum Contribution (%)",
     "contrib_alpha":   "Pure Alpha Contribution (%)",
-    # Active Share Proxies
-    "active_share_proxy_te": "Active Share Proxy (TE)",
-    "active_share_proxy_r2": "Active Share Proxy (1-R²)",
-    "active_bet_score":      "Active Bet Score",
 }

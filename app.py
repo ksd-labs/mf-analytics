@@ -5,14 +5,12 @@ MF Quantitative Analytics Platform — Home Page
 
 Entry point. Run with:  streamlit run app.py
 
-This is the HOME page. The 6 pages in pages/ are automatically added
-to the sidebar by Streamlit's multi-page app system.
+This IS the dashboard. The pages in pages/ are added to the sidebar
+by Streamlit's multi-page app system.
 
-Home page shows:
-  - Platform header + description
-  - Category overview cards (fund counts)
-  - Quick navigation guide
-  - Global sidebar controls (risk-free rate, refresh)
+Phase D change: 1_Dashboard.py and 2_Category_Explorer.py removed.
+  - Dashboard content now lives here (it already did — duplication resolved)
+  - Category Explorer replaced by Quartile View tab inside Rankings page
 """
 
 import streamlit as st
@@ -25,23 +23,21 @@ from utils.constants      import (
     APP_TITLE, APP_ICON, APP_SUBTITLE, APP_VERSION, CATEGORIES,
 )
 
-# ── Page config — must be first Streamlit call ────────────────────────────────
 st.set_page_config(
-    page_title          = f"{APP_TITLE}",
-    page_icon           = APP_ICON,
-    layout              = "wide",
+    page_title            = f"{APP_TITLE}",
+    page_icon             = APP_ICON,
+    layout                = "wide",
     initial_sidebar_state = "expanded",
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SIDEBAR — global controls (shared state via session_state)
+# SIDEBAR
 # ─────────────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title(f"{APP_ICON} {APP_TITLE}")
     st.caption(APP_SUBTITLE)
     st.divider()
 
-    # Risk-free rate — persists across all pages via session_state
     rf_pct = st.slider(
         "Risk-Free Rate (%)",
         min_value = 4.0,
@@ -62,7 +58,6 @@ with st.sidebar:
     st.session_state["plan_type"] = plan_type
 
     st.divider()
-
     from utils.session import render_refresh_button
     render_refresh_button()
 
@@ -107,10 +102,10 @@ total_growth = sum(counts.values())
 # KPI ROW
 # ─────────────────────────────────────────────────────────────────────────────
 k1, k2, k3, k4 = st.columns(4)
-k1.metric("Total AMFI Schemes",       f"{len(all_schemes):,}")
-k2.metric("Growth Funds Tracked",     f"{total_growth:,}")
-k3.metric("Categories Supported",     f"{len(CATEGORIES)}")
-k4.metric("Active Risk-Free Rate",    f"{rf_pct:.1f}%")
+k1.metric("Total AMFI Schemes",   f"{len(all_schemes):,}")
+k2.metric("Growth Funds Tracked", f"{total_growth:,}")
+k3.metric("Categories Supported", f"{len(CATEGORIES)}")
+k4.metric("Active Risk-Free Rate",f"{rf_pct:.1f}%")
 st.divider()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -119,15 +114,15 @@ st.divider()
 left, right = st.columns([1.1, 0.9], gap="large")
 
 ICONS = {
-    "Large Cap": "🏛️",    "Mid Cap": "🏢",          "Small Cap": "🏗️",
-    "Flexi Cap": "🔄",    "Multi Cap": "🗂️",         "ELSS": "💰",
-    "Value": "🔍",        "Contra": "↩️",            "Focused": "🎯",
+    "Large Cap": "🏛️",   "Mid Cap": "🏢",           "Small Cap": "🏗️",
+    "Flexi Cap": "🔄",   "Multi Cap": "🗂️",          "ELSS": "💰",
+    "Value": "🔍",       "Contra": "↩️",             "Focused": "🎯",
     "Aggressive Hybrid": "⚖️", "Balanced Advantage": "🧮", "Index Funds": "📈",
 }
 
 with left:
     st.subheader("📂 Fund Counts by Category")
-    st.caption("Growth plans only — ETFs, FoFs, Dividend/IDCW excluded.")
+    st.caption(f"**{plan_type} plans** · Growth only · ETFs, FoFs, Dividend/IDCW excluded.")
     card_cols = st.columns(3)
     for i, cat in enumerate(CATEGORIES):
         n    = counts.get(cat, 0)
@@ -180,28 +175,43 @@ st.divider()
 # NAVIGATION GUIDE
 # ─────────────────────────────────────────────────────────────────────────────
 st.subheader("🗺️ Navigation Guide")
-c1, c2, c3, c4, c5, c6 = st.columns(6)
+c1, c2, c3, c4 = st.columns(4)
 
 nav_items = [
-    ("📊",  "Dashboard",           "You are here — category overview and fund counts."),
-    ("🔍",  "Category Explorer",   "Browse all funds in a category. Run full analytics with one click."),
-    ("📋",  "Fund Analytics",      "Deep dive into a single fund — all 31 metrics and 6 charts."),
-    ("⚖️",  "Fund Comparison",     "Compare 2–5 funds side by side with normalised charts."),
-    ("🏆",  "Rankings",            "Category-wide ranking tables for every metric. CSV export."),
-    ("🔬",  "Data Quality",        "Check NAV history coverage and missing data warnings."),
+    (
+        "📋", "Fund Analytics",
+        "Select any fund for a deep dive — all 64 metrics across performance, "
+        "risk, alpha, momentum, and factor model. 5 chart tabs included.",
+    ),
+    (
+        "⚖️", "Fund Comparison",
+        "Compare 2–5 funds side by side using Value Research-style trailing "
+        "returns charts. Period selector: 1M to All.",
+    ),
+    (
+        "🏆", "Rankings",
+        "Category-wide ranking tables across 10 metric groups. "
+        "Includes full quartile view (Q1–Q4) for all funds and all metrics. "
+        "CSV export on every table.",
+    ),
+    (
+        "🔬", "Data Quality",
+        "Check NAV history length, missing data gaps, and metric "
+        "coverage per fund before running analytics.",
+    ),
 ]
 
-for col, (icon, title, desc) in zip([c1, c2, c3, c4, c5, c6], nav_items):
+for col, (icon, title, desc) in zip([c1, c2, c3, c4], nav_items):
     col.markdown(
         f"""
         <div style="
             background:rgba(255,255,255,0.04);
             border:1px solid rgba(255,255,255,0.08);
-            border-radius:8px; padding:14px; height:140px;
+            border-radius:8px; padding:16px; min-height:160px;
         ">
             <div style="font-size:1.6em">{icon}</div>
-            <div style="font-weight:700; font-size:0.9em; margin:6px 0 4px">{title}</div>
-            <div style="font-size:0.78em; color:#90A4AE">{desc}</div>
+            <div style="font-weight:700; font-size:0.95em; margin:8px 0 6px">{title}</div>
+            <div style="font-size:0.80em; color:#90A4AE; line-height:1.5">{desc}</div>
         </div>
         """,
         unsafe_allow_html=True,
