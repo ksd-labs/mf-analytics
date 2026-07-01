@@ -5,15 +5,17 @@ Predictive Analytics — Risk Forecasting & Scenario Analysis
 
 Applies to a single fund selected in the sidebar.
 
-Four tabs:
+Three tabs:
   📊 Volatility Forecast  — GARCH(1,1): conditional vol, 30/60/90 day
                             forecast, VaR, CVaR, model parameters
   🎲 Monte Carlo          — Block bootstrap: fan chart, probability of
                             shortfall, terminal return distribution
   📉 Drawdown Risk        — Derived from Monte Carlo paths: max drawdown
                             distribution, Drawdown at Risk, exceed probs
-  🔄 Market Regimes       — 2-state HMM: Bull/Bear classification,
-                            current regime probability, regime stats
+
+Note (Phase E): Market Regimes tab (HMM) removed — hmmlearn has Python
+  version compatibility issues that risk deployment stability. Will be
+  revisited when Nifty 500 TRI data is available.
 
 IMPORTANT FRAMING:
   All outputs are scenario analysis or statistical risk estimation.
@@ -36,7 +38,6 @@ from data.fund_loader      import get_all_categorized_schemes, get_nav_history
 from data.nav_processor    import process_nav, compute_daily_returns
 from analytics.garch_model import get_garch_summary
 from analytics.monte_carlo import run_monte_carlo
-from analytics.regime_model import get_regime_summary
 from visualizations._theme import base_layout, get_color, BG_PAPER, GRID_COLOR
 from utils.constants  import CATEGORIES, APP_TITLE, APP_ICON, TRADING_DAYS_PER_YEAR
 from utils.formatters import fmt_pct, fmt_ratio
@@ -312,52 +313,6 @@ def _plot_dd_distribution(mc: dict) -> go.Figure:
     return fig
 
 
-def _plot_regime_timeline(regime: dict, nav: pd.Series, fund_name: str) -> go.Figure:
-    """Fund NAV line with Bull/Bear regime background shading."""
-    blocks = regime["regime_blocks"]
-
-    fig = go.Figure()
-
-    # Background: shade each regime block
-    COLOR_MAP = {
-        "Bull 🐂": "rgba(76,175,80,0.15)",
-        "Bear 🐻": "rgba(244,67,54,0.15)",
-    }
-    for block in blocks:
-        color = COLOR_MAP.get(block["label"], "rgba(150,150,150,0.10)")
-        fig.add_vrect(
-            x0=block["start"], x1=block["end"],
-            fillcolor=color, line_width=0,
-            annotation_text="" ,
-        )
-
-    # Fund NAV line
-    fig.add_trace(go.Scatter(
-        x=nav.index, y=nav.values,
-        mode="lines", name=fund_name[:40],
-        line=dict(color=get_color(0), width=1.5),
-        hovertemplate="%{x|%d %b %Y}: ₹%{y:.2f}<extra>NAV</extra>",
-    ))
-
-    # Dummy traces for legend
-    for label, color_hex in [("Bull 🐂", "#4CAF50"), ("Bear 🐻", "#F44336")]:
-        fig.add_trace(go.Scatter(
-            x=[None], y=[None], mode="markers",
-            marker=dict(size=10, color=color_hex, symbol="square"),
-            name=label, showlegend=True,
-        ))
-
-    fig.update_layout(base_layout(
-        title=f"Fund NAV with Detected Regimes — {fund_name[:50]}",
-        height=420,
-    ))
-    fig.update_layout(
-        yaxis=dict(title="NAV (₹)"),
-        xaxis=dict(title=""),
-        legend=dict(orientation="h", y=-0.15),
-    )
-    return fig
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HEADER + DISCLAIMER
@@ -435,7 +390,7 @@ if run_btn or st.session_state.get(run_key):
         garch_res = get_garch_summary(returns, rf_rate=rf_rate)
 
         # Step 3: Monte Carlo
-        prog.progress(45, text=f"Running {n_sims:,} Monte Carlo simulations…")
+        prog.progress(55, text=f"Running {n_sims:,} Monte Carlo simulations…")
         mc_res = run_monte_carlo(
             returns,
             horizon_years = horizon_years,
@@ -443,10 +398,6 @@ if run_btn or st.session_state.get(run_key):
             initial_nav   = 100.0,
             block_size    = 21,
         )
-
-        # Step 4: HMM Regimes
-        prog.progress(75, text="Detecting market regimes (HMM)…")
-        regime_res = get_regime_summary(returns, n_states=2)
 
         prog.progress(100, text="Complete.")
         prog.empty()
@@ -456,7 +407,6 @@ if run_btn or st.session_state.get(run_key):
             "returns": returns,
             "garch":   garch_res,
             "mc":      mc_res,
-            "regime":  regime_res,
         }
 
     # ── Load from cache ───────────────────────────────────────────────────
@@ -465,7 +415,6 @@ if run_btn or st.session_state.get(run_key):
     returns = cached["returns"]
     garch   = cached["garch"]
     mc      = cached["mc"]
-    regime  = cached["regime"]
 
     n_days  = len(returns.dropna())
     hist_yrs= n_days / TRADING_DAYS_PER_YEAR
@@ -479,11 +428,10 @@ if run_btn or st.session_state.get(run_key):
     # ─────────────────────────────────────────────────────────────────────
     # TABS
     # ─────────────────────────────────────────────────────────────────────
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3 = st.tabs([
         "📊 Volatility Forecast",
         "🎲 Monte Carlo",
         "📉 Drawdown Risk",
-        "🔄 Market Regimes",
     ])
 
     # ─────────────────────────────────────────────────────────────────────
@@ -716,98 +664,9 @@ if run_btn or st.session_state.get(run_key):
                     "Future crises may be more severe than any in the training window."
                 )
 
-    # ─────────────────────────────────────────────────────────────────────
-    # TAB 4: MARKET REGIMES
-    # ─────────────────────────────────────────────────────────────────────
-    with tab4:
-        if not regime["is_valid"]:
-            err = regime.get("error", "Unknown error")
-            if "hmmlearn" in err:
-                st.error("hmmlearn is not installed. Run: `pip install hmmlearn` and restart.")
-            else:
-                st.error(f"Regime detection failed: {err}")
-        else:
-            st.subheader("Market Regime Detection — 2-State HMM")
-            st.caption(
-                "A Hidden Markov Model identifies two latent states (Bull and Bear) from the "
-                "fund's own daily returns. States are labelled automatically: the state with the "
-                "higher mean daily return is Bull; the lower is Bear. Current-state probabilities "
-                "are posterior estimates — they carry uncertainty and should not be treated as certainties.  \n"
-                "Note: This reflects the fund's return dynamics, not a broad market index. "
-                "Upgrade to Nifty 500 TRI when available for market-level regime classification."
-            )
-
-            # ── Current regime ─────────────────────────────────────────────
-            current    = regime["current_regime"]
-            posteriors = regime["current_posteriors"]
-            cur_prob   = posteriors.get(current, 0.0)
-
-            st.subheader(f"Current Regime: {current}")
-            post_cols = st.columns(len(posteriors))
-            for col, (label, prob) in zip(post_cols, posteriors.items()):
-                col.metric(f"{label} Probability", f"{prob*100:.1f}%")
-
-            if cur_prob < 0.65:
-                st.warning(
-                    f"⚠️ Current regime probability is only {cur_prob*100:.1f}% — "
-                    "the model is uncertain about the current state. "
-                    "Interpret regime classification with caution.",
-                )
-
-            st.divider()
-
-            # ── Regime timeline ────────────────────────────────────────────
-            st.plotly_chart(
-                _plot_regime_timeline(regime, nav, sel_name),
-                use_container_width=True,
-            )
-
-            st.divider()
-
-            # ── Regime statistics ──────────────────────────────────────────
-            st.subheader("Regime-Conditional Statistics")
-            st.caption(
-                "Average return, volatility, and time spent in each regime over the full history."
-            )
-
-            reg_rows = []
-            for label, stats in regime["regime_stats"].items():
-                reg_rows.append({
-                    "Regime":           label,
-                    "Avg Ann. Return":  fmt_pct(stats["mean_ann_return"]),
-                    "Ann. Volatility":  fmt_pct(stats["ann_vol"]),
-                    "Sharpe (approx)":  fmt_ratio(stats["sharpe"]),
-                    "% of History":     f"{stats['pct_time']*100:.1f}%",
-                    "Total Days":       f"{stats['n_days']:,}",
-                    "Avg Duration":     f"{regime['expected_duration'].get(label, 0):.0f} days",
-                })
-            st.dataframe(
-                pd.DataFrame(reg_rows),
-                use_container_width=True,
-                hide_index=True,
-            )
-
-            st.divider()
-
-            # ── Transition matrix ──────────────────────────────────────────
-            st.subheader("Regime Transition Probabilities")
-            st.caption(
-                "Probability of transitioning from one regime to another on any given trading day."
-            )
-            trans_df = regime["transition_matrix"].round(4)
-            st.dataframe(trans_df.style.format("{:.4f}"), use_container_width=True)
-
-            st.info(
-                "**How to read the transition matrix:** Each row sums to 1.0. "
-                "The diagonal shows the probability of *staying* in the current regime. "
-                f"Expected durations are computed as 1 / (1 - diagonal).",
-                icon="ℹ️",
-            )
-
 else:
     st.info(
         "Configure settings above and click **⚡ Run Analysis** to compute "
-        "GARCH volatility forecasts, Monte Carlo scenario analysis, drawdown risk, "
-        "and market regime detection.",
+        "GARCH volatility forecasts, Monte Carlo scenario analysis, and drawdown risk.",
         icon="🔮",
     )
