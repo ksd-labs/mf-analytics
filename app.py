@@ -38,14 +38,24 @@ with st.sidebar:
     st.caption(APP_SUBTITLE)
     st.divider()
 
+    col_rf, col_down, col_up = st.columns([3, 1, 1])
     rf_pct = st.slider(
         "Risk-Free Rate (%)",
         min_value = 4.0,
         max_value = 9.0,
-        value     = st.session_state.get("rf_rate", 6.5),
+        value     = st.session_state.get("rf_rate", 7.0),
         step      = 0.1,
-        help      = "Indian 91-day T-bill rate. Used for Sharpe & Sortino.",
+        help      = "Used for Sharpe & Sortino.",
     )
+    
+    if col_down.button("−", key=f"rf_down_{__file__}"):
+        rf_pct = max(4.0, round(rf_pct - 0.1, 1))
+        st.session_state["rf_rate"] = rf_pct
+        st.rerun()
+    if col_up.button("+", key=f"rf_up_{__file__}"):
+        rf_pct = min(9.0, round(rf_pct + 0.1, 1))
+        st.session_state["rf_rate"] = rf_pct
+        st.rerun()
     st.session_state["rf_rate"] = rf_pct
 
     plan_type = st.radio(
@@ -60,6 +70,27 @@ with st.sidebar:
     st.divider()
     from utils.session import render_refresh_button
     render_refresh_button()
+
+    from data.tri_loader import get_tri_nav, get_tri_staleness_warning, is_tri_available
+    st.divider()
+    st.markdown("**📡 Benchmark Data**")
+    for idx_name, label in [
+        ("NIFTY 500",        "Nifty 500"),
+        ("NIFTY 100",        "Nifty 100"),
+        ("NIFTY MIDCAP 150", "Midcap 150"),
+        ("NIFTY SMALLCAP 250", "Smallcap 250"),
+        ("NIFTY 50",         "Nifty 50"),
+    ]:
+        if is_tri_available(idx_name):
+            nav = get_tri_nav(idx_name)
+            warning = get_tri_staleness_warning(idx_name)
+            last_date = nav.index[-1].strftime("%d %b %Y") if nav is not None else "?"
+            if warning:
+                st.warning(f"{label}: {last_date} ⚠️", icon="⚠️")
+            else:
+                st.caption(f"✅ {label}: {last_date}")
+        else:
+            st.caption(f"🔄 {label}: proxy")
 
     st.caption(
         f"NAV sourced from AMFI via mfapi.in\n"

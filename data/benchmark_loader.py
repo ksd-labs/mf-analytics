@@ -3,43 +3,69 @@ data/benchmark_loader.py
 =========================
 Benchmark data layer for alpha generation features.
 
-Strategy:
-    We use Index Fund NAVs as benchmark proxies. SEBI-registered index funds
-    tracking each benchmark are already in mftool — no external data source needed.
+Strategy (Phase F — TRI Integration):
+    TRI-FIRST: When a validated TRI CSV exists in data/tri/, use it.
+    FALLBACK:  If the CSV is missing or unreadable, fall back to the
+               existing index fund NAV proxy (original behaviour).
 
-    Category → Benchmark Index → Index Fund NAV (proxy for TRI)
+    This makes the upgrade backward-compatible. The rest of the platform
+    (engine, pages, visualizations) is completely unaware of the change —
+    get_benchmark_nav() still returns a DataFrame with 'nav' column or None.
 
-    This is a standard institutional practice when the Total Return Index (TRI)
-    series itself is not available via the data source — index fund NAVs track
-    the TRI very closely (tracking error < 0.1% per year for most index funds).
-
-Benchmark Mapping (SEBI mandated benchmarks per category):
-    Large Cap         → Nifty 100 TRI        (proxy: Nifty 100 Index Fund)
-    Mid Cap           → Nifty Midcap 150 TRI  (proxy: Nifty Midcap 150 Index Fund)
-    Small Cap         → Nifty Smallcap 250 TRI(proxy: Nifty Smallcap 250 Index Fund)
-    Flexi Cap         → Nifty 500 TRI         (proxy: Nifty 500 Index Fund)
-    Multi Cap         → Nifty 500 TRI         (proxy: Nifty 500 Index Fund)
-    ELSS              → Nifty 500 TRI         (proxy: Nifty 500 Index Fund)
-    Value             → Nifty 500 TRI         (proxy: Nifty 500 Index Fund)
-    Contra            → Nifty 500 TRI         (proxy: Nifty 500 Index Fund)
-    Focused           → Nifty 500 TRI         (proxy: Nifty 500 Index Fund)
-    Aggressive Hybrid → Nifty 50 TRI          (proxy: Nifty 50 Index Fund)
-    Balanced Advantage→ Nifty 50 TRI          (proxy: Nifty 50 Index Fund)
+TRI → Category mapping:
+    Large Cap         → NIFTY 100         (data/tri/NIFTY_100_TRI.csv)
+    Mid Cap           → NIFTY MIDCAP 150  (data/tri/NIFTY_MIDCAP_150_TRI.csv)
+    Small Cap         → NIFTY SMALLCAP 250(data/tri/NIFTY_SMALLCAP_250_TRI.csv)
+    Flexi Cap         → NIFTY 500         (data/tri/NIFTY_500_TRI.csv)
+    Multi Cap         → NIFTY 500
+    ELSS              → NIFTY 500
+    Value             → NIFTY 500
+    Contra            → NIFTY 500
+    Focused           → NIFTY 500
+    Aggressive Hybrid → NIFTY 50          (data/tri/NIFTY_50_TRI.csv)
+    Balanced Advantage→ NIFTY 50
     Index Funds       → None (each fund is its own benchmark)
+
+Proxy fallback (original behaviour — unchanged):
+    Uses keyword search against mftool scheme names to find a Direct Growth
+    index fund that tracks the appropriate benchmark. Tracking error vs true
+    TRI is typically < 0.2% per year — acceptable but inferior to true TRI.
 """
 
 import streamlit as st
 import pandas as pd
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List
 import logging
 
 logger = logging.getLogger(__name__)
 
+
 # ─────────────────────────────────────────────────────────────────────────────
-# BENCHMARK CONFIGURATION
+# TRI INDEX MAPPING  (new in Phase F)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Human-readable benchmark names (for display in UI)
+# Maps each MF category to its true benchmark TRI index name.
+# Keys must exactly match keys in indices/config/index_metadata.py INDEX_METADATA.
+CATEGORY_TO_TRI_INDEX: Dict[str, Optional[str]] = {
+    "Large Cap":          "NIFTY 100",
+    "Mid Cap":            "NIFTY MIDCAP 150",
+    "Small Cap":          "NIFTY SMALLCAP 250",
+    "Flexi Cap":          "NIFTY 500",
+    "Multi Cap":          "NIFTY 500",
+    "ELSS":               "NIFTY 500",
+    "Value":              "NIFTY 500",
+    "Contra":             "NIFTY 500",
+    "Focused":            "NIFTY 500",
+    "Aggressive Hybrid":  "NIFTY 50",
+    "Balanced Advantage": "NIFTY 50",
+    "Index Funds":        None,          # No single benchmark
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BENCHMARK CONFIGURATION  (unchanged)
+# ─────────────────────────────────────────────────────────────────────────────
+
 BENCHMARK_DISPLAY_NAMES: Dict[str, str] = {
     "Large Cap":          "Nifty 100 TRI",
     "Mid Cap":            "Nifty Midcap 150 TRI",
@@ -55,9 +81,6 @@ BENCHMARK_DISPLAY_NAMES: Dict[str, str] = {
     "Index Funds":        "N/A — each fund tracks its own index",
 }
 
-# Keywords to search for in scheme names when looking for the benchmark index fund.
-# Listed in priority order — first keyword that produces a Direct Growth match wins.
-# We deliberately search for multiple keywords to handle different AMC naming conventions.
 BENCHMARK_SEARCH_KEYWORDS: Dict[str, List[str]] = {
     "Large Cap": [
         "nifty 100 index fund",
@@ -108,47 +131,32 @@ BENCHMARK_SEARCH_KEYWORDS: Dict[str, List[str]] = {
         "nifty 50 index fund",
         "nifty 50 ",
     ],
-    "Index Funds": [],   # No single benchmark
+    "Index Funds": [],
 }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# BENCHMARK SCHEME FINDER
+# PROXY SCHEME FINDER  (unchanged)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def find_benchmark_scheme(category: str) -> Optional[Dict]:
     """
     Find the best matching Direct Growth index fund for a category's benchmark.
-
-    Search strategy:
-        1. Load all available schemes from mftool
-        2. Filter to Direct Growth plans only (index funds use Direct for clean tracking)
-        3. Exclude ETFs (we want open-ended index funds, not exchange-traded)
-        4. Search scheme names for benchmark keywords in priority order
-        5. Return the first match as {code, name}
-
-    Args:
-        category: One of the 12 supported category strings
-
-    Returns:
-        {'code': str, 'name': str} for the benchmark scheme, or None if not found.
+    Used as fallback when TRI CSV is not available.
     """
     keywords = BENCHMARK_SEARCH_KEYWORDS.get(category, [])
     if not keywords:
-        logger.info(f"No benchmark defined for category: {category}")
         return None
 
     from data.fund_loader import get_all_schemes
 
     all_schemes = get_all_schemes()
     if not all_schemes:
-        logger.error("Cannot find benchmark — scheme list is empty")
+        logger.error("Cannot find benchmark scheme — scheme list is empty")
         return None
 
-    # Filter: must be Direct + Growth + NOT ETF
     exclusions = ["etf", "exchange traded", "idcw", "dividend", "regular"]
-
     candidates = {
         code: name
         for code, name in all_schemes.items()
@@ -157,76 +165,136 @@ def find_benchmark_scheme(category: str) -> Optional[Dict]:
         and not any(excl in name.lower() for excl in exclusions)
     }
 
-    # Search by keyword priority
     for keyword in keywords:
         for code, name in candidates.items():
             if keyword in name.lower():
-                logger.info(f"Benchmark for {category}: {name} ({code})")
+                logger.info(f"Benchmark proxy for {category}: {name} ({code})")
                 return {"code": code, "name": name}
 
     logger.warning(f"No benchmark scheme found for {category}")
     return None
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# BENCHMARK NAV  (TRI-first in Phase F)
+# ─────────────────────────────────────────────────────────────────────────────
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_benchmark_nav(category: str) -> Optional[pd.DataFrame]:
     """
-    Fetch the NAV history for a category's benchmark index fund.
+    Fetch the benchmark NAV/TRI series for a category.
+
+    Step 1 — True TRI (Phase F):
+        Look up CATEGORY_TO_TRI_INDEX for the category.
+        If a CSV exists in data/tri/, load and return it.
+        Return format: DataFrame(DatetimeIndex, 'nav' column) — identical
+        to get_nav_history() so process_nav() works without any change.
+
+    Step 2 — Proxy fallback (original behaviour):
+        If TRI CSV is missing or unreadable, find a Direct Growth index fund
+        via keyword search and fetch its NAV from mftool.
 
     Args:
-        category: Category string
+        category: One of the 12 supported category strings.
 
     Returns:
         DataFrame with DatetimeIndex and 'nav' float column, or None.
     """
+    # ── Step 1: Try true TRI ──────────────────────────────────────────────
+    tri_index = CATEGORY_TO_TRI_INDEX.get(category)
+
+    if tri_index is not None:
+        try:
+            from data.tri_loader import get_tri_nav
+            tri_nav = get_tri_nav(tri_index)
+            if tri_nav is not None and not tri_nav.empty:
+                logger.info(
+                    f"Benchmark for {category}: using true TRI ({tri_index})"
+                )
+                return tri_nav
+        except Exception as exc:
+            logger.warning(
+                f"TRI load failed for {category} ({tri_index}): {exc}. "
+                "Falling back to index fund proxy."
+            )
+
+    # ── Step 2: Proxy fallback ────────────────────────────────────────────
     benchmark = find_benchmark_scheme(category)
     if benchmark is None:
         return None
 
     from data.fund_loader import get_nav_history
-    nav_df = get_nav_history(benchmark["code"])
 
+    nav_df = get_nav_history(benchmark["code"])
     if nav_df is None:
-        logger.warning(f"Could not fetch benchmark NAV for {category} "
-                       f"(scheme: {benchmark.get('name')})")
+        logger.warning(
+            f"Could not fetch proxy benchmark NAV for {category} "
+            f"(scheme: {benchmark.get('name')})"
+        )
     return nav_df
 
 
-def get_all_category_benchmarks() -> Dict[str, Optional[Dict]]:
-    """
-    Find benchmark schemes for all 12 categories.
-    Used on the Dashboard page to show benchmark coverage.
-
-    Returns:
-        {category: {'code': str, 'name': str} or None}
-    """
-    from utils.constants import CATEGORIES
-    return {cat: find_benchmark_scheme(cat) for cat in CATEGORIES}
-
-
 # ─────────────────────────────────────────────────────────────────────────────
-# BENCHMARK AVAILABILITY CHECK
+# BENCHMARK INFO  (extended in Phase F)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_benchmark_info(category: str) -> Dict:
     """
     Return display-ready benchmark information for a category.
-    Used in the Fund Analytics sidebar.
 
-    Returns:
-        {
-          'display_name': str,       e.g. 'Nifty 100 TRI'
-          'scheme_name':  str,       actual index fund name used as proxy
-          'scheme_code':  str,       scheme code
-          'available':    bool,      True if benchmark NAV can be loaded
-        }
+    Phase F additions:
+        'data_source'      → "tri" if true TRI CSV is used, "proxy" otherwise
+        'staleness_warning'→ warning string if TRI data is > 7 days old, else None
+
+    Existing keys (unchanged — all callers remain compatible):
+        'display_name'  → e.g. 'Nifty 100 TRI'
+        'scheme_name'   → index fund name (proxy) or 'True TRI — niftyindices.com'
+        'scheme_code'   → scheme code (proxy) or None (TRI)
+        'available'     → True if benchmark can be loaded
     """
-    display = BENCHMARK_DISPLAY_NAMES.get(category, "N/A")
-    scheme  = find_benchmark_scheme(category)
+    display   = BENCHMARK_DISPLAY_NAMES.get(category, "N/A")
+    tri_index = CATEGORY_TO_TRI_INDEX.get(category)
 
+    # ── Check TRI availability ────────────────────────────────────────────
+    if tri_index is not None:
+        try:
+            from data.tri_loader import get_tri_nav, get_tri_staleness_warning, is_tri_available
+
+            if is_tri_available(tri_index):
+                tri_nav = get_tri_nav(tri_index)
+                if tri_nav is not None and not tri_nav.empty:
+                    staleness = get_tri_staleness_warning(tri_index)
+                    return {
+                        "display_name":     display,
+                        "scheme_name":      "True TRI — niftyindices.com",
+                        "scheme_code":      None,
+                        "available":        True,
+                        "data_source":      "tri",
+                        "staleness_warning": staleness,
+                    }
+        except Exception as exc:
+            logger.warning(f"TRI info check failed for {category}: {exc}")
+
+    # ── Proxy fallback info ───────────────────────────────────────────────
+    scheme = find_benchmark_scheme(category)
     return {
-        "display_name": display,
-        "scheme_name":  scheme["name"] if scheme else "Not found",
-        "scheme_code":  scheme["code"] if scheme else None,
-        "available":    scheme is not None,
+        "display_name":     display,
+        "scheme_name":      scheme["name"] if scheme else "Not found",
+        "scheme_code":      scheme["code"] if scheme else None,
+        "available":        scheme is not None,
+        "data_source":      "proxy",
+        "staleness_warning": None,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BULK AVAILABILITY CHECK  (unchanged)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_all_category_benchmarks() -> Dict[str, Optional[Dict]]:
+    """
+    Find benchmark schemes for all 12 categories.
+    Used on the Dashboard page to show benchmark coverage.
+    """
+    from utils.constants import CATEGORIES
+    return {cat: find_benchmark_scheme(cat) for cat in CATEGORIES}
