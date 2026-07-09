@@ -18,6 +18,7 @@ CHANGE from indice_loader standalone:
 import json
 import time
 from datetime import datetime
+from urllib import response
 
 import pandas as pd
 import requests
@@ -77,8 +78,8 @@ def fetch_chunk(
         timeout=REQUEST_TIMEOUT,
     )
     response.raise_for_status()
-
     data = response.json()
+
     if not data:
         return pd.DataFrame()
 

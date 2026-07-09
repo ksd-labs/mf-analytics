@@ -6,10 +6,9 @@ import logging
 
 from pathlib import Path
 
-from config.index_metadata import (
+from indices.config.index_metadata import (
     LOG_DIR,
 )
-
 
 def get_logger(
     name: str

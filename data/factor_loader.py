@@ -1,32 +1,27 @@
 """
 data/factor_loader.py
 ======================
-Constructs Fama-French factor return series using Indian index fund NAVs.
+Constructs factor return series for Fama-French style models.
 
-Factor construction strategy:
-    We use index fund NAVs as factor proxies — no external data needed.
-    All proxy instruments are open-ended index funds available in mftool.
+Two public functions:
+    get_factor_returns(rf_rate)     → 4-factor model (used by engine.py)
+    get_factor_returns_6f(rf_rate)  → 6-factor model (used by Factor Attribution page)
 
-    Factor        Formula                         Proxy Instruments
-    ─────────────────────────────────────────────────────────────────────────
-    Market-Rf     Nifty 500 return − rf_daily      Motilal Oswal / UTI Nifty 500
-    SMB           Smallcap250 − Nifty100           Nippon Smallcap 250 − UTI Nifty 100
-    HML           Value50 − Nifty500               Nifty 500 Value 50 − Nifty 500
-    WML           Momentum30 − Nifty500            Nifty 200 Momentum 30 − Nifty 500
+Factor definitions:
+    Market  =  Nifty500 TRI return  −  rf_daily
+    SMB     =  Nifty Smallcap250 TRI  −  Nifty100 TRI
+    HML     =  Nifty500 Value50 TRI   −  Nifty500 TRI
+    WML     =  Nifty200 Momentum30 TRI −  Nifty500 TRI
+    QMJ     =  Nifty200 Quality30 TRI  −  Nifty500 TRI   [6F only]
+    BAB     =  Nifty100 LowVol30 TRI   −  Nifty100 TRI   [6F only]
 
-    SMB approximation: True SMB requires sorting every listed stock into
-    size buckets monthly. Using (Smallcap250 − Nifty100) as a proxy is
-    a widely accepted simplification for India-specific research.
+Data strategy (TRI-first):
+    1. Try true TRI from data/tri/ via tri_loader.get_tri_nav()
+    2. Fall back to Direct Growth index fund NAV from mftool
+    QMJ and BAB have no index fund proxies — TRI only.
 
-    HML approximation: Nifty 500 Value 50 tracks the 50 most value-oriented
-    stocks in the Nifty 500. Subtracting the broad Nifty 500 isolates the
-    value premium. This is a reasonable proxy though not exact HML.
-
-Graceful degradation:
-    If a proxy instrument is not found (e.g., Momentum 30 is a newer index),
-    that factor is excluded and the model uses fewer factors.
-    Minimum viable model = 1 factor (Market only = CAPM).
-    Results always report which factors were included.
+6F model requires all 6 factors. If any TRI file is missing for
+QMJ or BAB, get_factor_returns_6f() returns None.
 """
 
 import streamlit as st
@@ -38,78 +33,85 @@ import logging
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FACTOR PROXY SEARCH KEYWORDS
+# DISPLAY NAMES
 # ─────────────────────────────────────────────────────────────────────────────
-# Listed in priority order — first keyword that produces a Direct Growth match wins.
 
-FACTOR_PROXY_KEYWORDS: Dict[str, List[str]] = {
-    # Market factor — broad market index
-    "market": [
-        "nifty 500 index fund",
-        "nifty500 index fund",
-        "nifty 500 ",
-    ],
-    # Small cap proxy (for SMB numerator)
-    "small": [
-        "nifty smallcap 250 index fund",
-        "smallcap 250 index fund",
-        "nifty smallcap 250",
-    ],
-    # Large cap proxy (for SMB denominator)
-    "large": [
-        "nifty 100 index fund",
-        "nifty100 index fund",
-        "nifty 100 ",
-    ],
-    # Value proxy (for HML numerator)
-    "value": [
-        "nifty 500 value 50",
-        "value 50 index",
-        "nifty value 50",
-        "nifty500 value",
-    ],
-    # Momentum proxy (for WML numerator)
-    "momentum": [
-        "nifty 200 momentum 30",
-        "momentum 30 index",
-        "nifty200 momentum",
-        "nifty 200 momentum",
-    ],
-}
-
-# Human-readable factor names for display
 FACTOR_DISPLAY_NAMES: Dict[str, str] = {
     "market": "Market (Mkt-Rf)",
     "smb":    "Size (SMB)",
     "hml":    "Value (HML)",
     "wml":    "Momentum (WML)",
+    "qmj":    "Quality (QMJ)",
+    "bab":    "Low Vol (BAB)",
+}
+
+FACTOR_COLORS: Dict[str, str] = {
+    "market": "#2196F3",
+    "smb":    "#FF9800",
+    "hml":    "#4CAF50",
+    "wml":    "#9C27B0",
+    "qmj":    "#F44336",
+    "bab":    "#00BCD4",
+    "alpha":  "#FFEB3B",
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PROXY SEARCH KEYWORDS (fallback for 4F factors)
+# ─────────────────────────────────────────────────────────────────────────────
+
+FACTOR_PROXY_KEYWORDS: Dict[str, List[str]] = {
+    "market": [
+        "nifty 500 index fund", "nifty500 index fund", "nifty 500 ",
+    ],
+    "small": [
+        "nifty smallcap 250 index fund", "smallcap 250 index fund", "nifty smallcap 250",
+    ],
+    "large": [
+        "nifty 100 index fund", "nifty100 index fund", "nifty 100 ",
+    ],
+    "value": [
+        "nifty 500 value 50", "value 50 index", "nifty value 50", "nifty500 value",
+    ],
+    "momentum": [
+        "nifty 200 momentum 30", "momentum 30 index", "nifty200 momentum", "nifty 200 momentum",
+    ],
 }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PROXY SCHEME FINDER
+# INTERNAL: TRI LOADING
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _load_tri_nav_series(index_name: str) -> Optional[pd.Series]:
+    """
+    Load a TRI series as a clean pd.Series via tri_loader → process_nav.
+    Returns None if the CSV is unavailable or fails to parse.
+    """
+    try:
+        from data.tri_loader import get_tri_nav
+        from data.nav_processor import process_nav
+        nav_df = get_tri_nav(index_name)
+        if nav_df is None:
+            return None
+        return process_nav(nav_df)
+    except Exception as exc:
+        logger.warning(f"TRI load failed for '{index_name}': {exc}")
+        return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INTERNAL: PROXY LOADING (fallback)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _find_proxy_scheme(factor_role: str) -> Optional[Dict]:
-    """
-    Find the best matching Direct Growth index fund for a factor proxy role.
-
-    Args:
-        factor_role: One of 'market', 'small', 'large', 'value', 'momentum'
-
-    Returns:
-        {'code': str, 'name': str} or None if not found.
-    """
     keywords = FACTOR_PROXY_KEYWORDS.get(factor_role, [])
     if not keywords:
         return None
-
     from data.fund_loader import get_all_schemes
     all_schemes = get_all_schemes()
     if not all_schemes:
         return None
-
     exclusions = ["etf", "exchange traded", "idcw", "dividend", "regular"]
     candidates = {
         code: name for code, name in all_schemes.items()
@@ -117,41 +119,64 @@ def _find_proxy_scheme(factor_role: str) -> Optional[Dict]:
         and "growth" in name.lower()
         and not any(e in name.lower() for e in exclusions)
     }
-
-    for keyword in keywords:
+    for kw in keywords:
         for code, name in candidates.items():
-            if keyword in name.lower():
-                logger.info(f"Factor proxy [{factor_role}]: {name} ({code})")
+            if kw in name.lower():
                 return {"code": code, "name": name}
-
-    logger.warning(f"No proxy found for factor role: {factor_role}")
     return None
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _load_proxy_nav(factor_role: str) -> Optional[pd.Series]:
-    """
-    Load and process the NAV series for a factor proxy instrument.
-
-    Returns:
-        Clean NAV pd.Series with DatetimeIndex, or None.
-    """
     scheme = _find_proxy_scheme(factor_role)
     if scheme is None:
         return None
-
     from data.fund_loader import get_nav_history
     from data.nav_processor import process_nav
-
     nav_df = get_nav_history(scheme["code"])
     if nav_df is None:
         return None
-
     return process_nav(nav_df)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FACTOR RETURN CONSTRUCTION
+# INTERNAL: TRI-FIRST COMPONENT LOADER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _load_component(tri_index: str, proxy_role: Optional[str] = None) -> Optional[pd.Series]:
+    """
+    Load a factor component NAV series.
+    Tries TRI first; if unavailable and proxy_role given, falls back to proxy.
+    """
+    nav = _load_tri_nav_series(tri_index)
+    if nav is not None:
+        return nav
+    if proxy_role:
+        logger.info(f"TRI unavailable for {tri_index}, using proxy ({proxy_role})")
+        return _load_proxy_nav(proxy_role)
+    return None
+
+
+def _compute_spread(
+    long_nav:  pd.Series,
+    short_nav: pd.Series,
+    min_common: int = 60,
+) -> Optional[pd.Series]:
+    """
+    Compute long_return − short_return over common dates.
+    Returns None if insufficient common history.
+    """
+    from data.nav_processor import compute_daily_returns
+    long_ret  = compute_daily_returns(long_nav)
+    short_ret = compute_daily_returns(short_nav)
+    common = long_ret.index.intersection(short_ret.index)
+    if len(common) < min_common:
+        return None
+    return long_ret.reindex(common) - short_ret.reindex(common)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PUBLIC: 4-FACTOR MODEL (used by engine.py — unchanged interface)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -159,116 +184,179 @@ def get_factor_returns(
     rf_rate: float = 0.065,
 ) -> Tuple[Optional[pd.DataFrame], Dict[str, Optional[str]]]:
     """
-    Construct daily factor return series for the 4-factor Fama-French-Carhart model.
+    Construct daily factor returns for the 4-factor Fama-French-Carhart model.
+    TRI-first with proxy fallback for all four factors.
 
-    Returns a tuple of:
+    Returns:
         (factor_df, proxy_names)
+        factor_df columns: market, smb, hml, wml
+    """
+    from data.nav_processor import compute_daily_returns
 
-    factor_df:   pd.DataFrame with columns for available factors:
-                 - 'market': Nifty500 excess return (return - rf_daily)
-                 - 'smb':    Small cap premium (Smallcap250 - Nifty100)
-                 - 'hml':    Value premium (Value50 - Nifty500)
-                 - 'wml':    Momentum premium (Momentum30 - Nifty500)
-                 Only columns where proxy data was found are included.
-                 All series aligned to their common date range.
+    rf_daily     = rf_rate / 252
+    proxy_names: Dict[str, Optional[str]] = {}
 
-    proxy_names: Dict mapping factor name to the scheme name used as proxy,
-                 or None if the factor could not be constructed.
-                 Used for display in the UI to show what proxy was used.
+    # ── Market ──────────────────────────────────────────────────────────────
+    market_nav = _load_component("NIFTY 500", proxy_role="market")
+    proxy_names["market"] = "TRI" if _load_tri_nav_series("NIFTY 500") is not None else \
+        (_find_proxy_scheme("market") or {}).get("name")
 
-    Args:
-        rf_rate: Annual risk-free rate for Market factor construction.
+    # ── SMB components ──────────────────────────────────────────────────────
+    small_nav = _load_component("NIFTY SMALLCAP 250", proxy_role="small")
+    large_nav = _load_component("NIFTY 100",          proxy_role="large")
+
+    # ── HML / WML components ────────────────────────────────────────────────
+    value_nav    = _load_component("NIFTY500 VALUE 50",     proxy_role="value")
+    momentum_nav = _load_component("NIFTY200 MOMENTUM 30",  proxy_role="momentum")
+
+    factor_series: Dict[str, pd.Series] = {}
+
+    # Market = Nifty500 return − rf
+    if market_nav is not None:
+        mkt_ret = compute_daily_returns(market_nav)
+        factor_series["market"] = mkt_ret - rf_daily
+
+    # SMB = Smallcap250 − Nifty100
+    if small_nav is not None and large_nav is not None:
+        smb = _compute_spread(small_nav, large_nav)
+        if smb is not None:
+            factor_series["smb"] = smb
+
+    # HML = Value50 − Nifty500
+    if value_nav is not None and market_nav is not None:
+        hml = _compute_spread(value_nav, market_nav)
+        if hml is not None:
+            factor_series["hml"] = hml
+
+    # WML = Momentum30 − Nifty500
+    if momentum_nav is not None and market_nav is not None:
+        wml = _compute_spread(momentum_nav, market_nav)
+        if wml is not None:
+            factor_series["wml"] = wml
+
+    if not factor_series:
+        return None, proxy_names
+
+    factor_df = pd.DataFrame(factor_series).dropna(how="all")
+    if len(factor_df) < 60:
+        return None, proxy_names
+
+    logger.info(f"4F returns: {list(factor_df.columns)}, {len(factor_df)} days")
+    return factor_df, proxy_names
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PUBLIC: 6-FACTOR MODEL (used by Factor Attribution page)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_factor_returns_6f(
+    rf_rate: float = 0.065,
+) -> Tuple[Optional[pd.DataFrame], Dict[str, Optional[str]], Optional[str]]:
+    """
+    Construct daily factor returns for the 6-factor model.
+    ALL 6 factors required — returns None if any factor is unavailable.
+
+    QMJ and BAB are TRI-only (no index fund proxy exists).
+
+    Returns:
+        (factor_df, source_names, error_message)
+        factor_df columns: market, smb, hml, wml, qmj, bab
+        error_message: None on success, string describing failure
     """
     from data.nav_processor import compute_daily_returns
 
     rf_daily = rf_rate / 252
 
-    # ── Load all proxy NAVs ───────────────────────────────────────────────────
-    market_nav  = _load_proxy_nav("market")
-    small_nav   = _load_proxy_nav("small")
-    large_nav   = _load_proxy_nav("large")
-    value_nav   = _load_proxy_nav("value")
-    momentum_nav = _load_proxy_nav("momentum")
+    # ── Load all components ──────────────────────────────────────────────────
+    market_nav   = _load_component("NIFTY 500",                  proxy_role="market")
+    small_nav    = _load_component("NIFTY SMALLCAP 250",         proxy_role="small")
+    large_nav    = _load_component("NIFTY 100",                  proxy_role="large")
+    value_nav    = _load_component("NIFTY500 VALUE 50",          proxy_role="value")
+    momentum_nav = _load_component("NIFTY200 MOMENTUM 30",       proxy_role="momentum")
+    quality_nav  = _load_tri_nav_series("NIFTY200 QUALITY 30")   # TRI only
+    lowvol_nav   = _load_tri_nav_series("NIFTY100 LOW VOLATILITY 30")  # TRI only
 
-    proxy_names: Dict[str, Optional[str]] = {}
+    # ── Validate all 6 are available ─────────────────────────────────────────
+    missing = []
+    if market_nav   is None: missing.append("Market (NIFTY 500)")
+    if small_nav    is None: missing.append("Small (NIFTY SMALLCAP 250)")
+    if large_nav    is None: missing.append("Large (NIFTY 100)")
+    if value_nav    is None: missing.append("Value (NIFTY500 VALUE 50)")
+    if momentum_nav is None: missing.append("Momentum (NIFTY200 MOMENTUM 30)")
+    if quality_nav  is None: missing.append("Quality (NIFTY200 QUALITY 30) — TRI required")
+    if lowvol_nav   is None: missing.append("Low Vol (NIFTY100 LOW VOLATILITY 30) — TRI required")
 
-    for role, nav in [("market", market_nav), ("small", small_nav),
-                      ("large", large_nav), ("value", value_nav),
-                      ("momentum", momentum_nav)]:
-        scheme = _find_proxy_scheme(role)
-        proxy_names[role] = scheme["name"] if scheme else None
-
-    # ── Compute individual return series ──────────────────────────────────────
-    mkt_ret  = compute_daily_returns(market_nav)   if market_nav  is not None else None
-    small_ret = compute_daily_returns(small_nav)   if small_nav   is not None else None
-    large_ret = compute_daily_returns(large_nav)   if large_nav   is not None else None
-    val_ret  = compute_daily_returns(value_nav)    if value_nav   is not None else None
-    mom_ret  = compute_daily_returns(momentum_nav) if momentum_nav is not None else None
+    if missing:
+        err = (
+            "6-Factor model requires all 6 factor series. Missing: "
+            + ", ".join(missing)
+            + ". Run python -m scripts.update_indices to refresh TRI data."
+        )
+        return None, {}, err
 
     # ── Build factor series ───────────────────────────────────────────────────
-    factor_series: Dict[str, pd.Series] = {}
+    mkt_ret = compute_daily_returns(market_nav)
 
-    # Market factor = Nifty500 return - rf_daily
-    if mkt_ret is not None:
-        factor_series["market"] = mkt_ret - rf_daily
-        proxy_names["market_factor"] = proxy_names.get("market")
+    smb = _compute_spread(small_nav,    large_nav)
+    hml = _compute_spread(value_nav,    market_nav)
+    wml = _compute_spread(momentum_nav, market_nav)
+    qmj = _compute_spread(quality_nav,  market_nav)
+    bab = _compute_spread(lowvol_nav,   large_nav)   # BAB vs Nifty100 universe
 
-    # SMB = Small return - Large return
-    if small_ret is not None and large_ret is not None:
-        common = small_ret.index.intersection(large_ret.index)
-        if len(common) >= 60:
-            factor_series["smb"] = (
-                small_ret.reindex(common) - large_ret.reindex(common)
-            )
+    spread_missing = []
+    if smb is None: spread_missing.append("SMB")
+    if hml is None: spread_missing.append("HML")
+    if wml is None: spread_missing.append("WML")
+    if qmj is None: spread_missing.append("QMJ")
+    if bab is None: spread_missing.append("BAB")
 
-    # HML = Value return - Market return (as broad market proxy)
-    # Using Nifty500 as the "low book-to-market" proxy
-    if val_ret is not None and mkt_ret is not None:
-        common = val_ret.index.intersection(mkt_ret.index)
-        if len(common) >= 60:
-            factor_series["hml"] = (
-                val_ret.reindex(common) - mkt_ret.reindex(common)
-            )
+    if spread_missing:
+        err = f"Insufficient common history to compute: {', '.join(spread_missing)}"
+        return None, {}, err
 
-    # WML = Momentum return - Market return
-    if mom_ret is not None and mkt_ret is not None:
-        common = mom_ret.index.intersection(mkt_ret.index)
-        if len(common) >= 60:
-            factor_series["wml"] = (
-                mom_ret.reindex(common) - mkt_ret.reindex(common)
-            )
+    factor_df = pd.DataFrame({
+        "market": mkt_ret - rf_daily,
+        "smb":    smb,
+        "hml":    hml,
+        "wml":    wml,
+        "qmj":    qmj,
+        "bab":    bab,
+    }).dropna()
 
-    if not factor_series:
-        return None, proxy_names
+    if len(factor_df) < 252:
+        return None, {}, "Less than 252 common trading days across all 6 factors."
 
-    # ── Align all factor series to common dates ───────────────────────────────
-    factor_df = pd.DataFrame(factor_series)
-    factor_df = factor_df.dropna(how="all")
+    source_names = {
+        "market": "NIFTY 500 TRI" if _load_tri_nav_series("NIFTY 500") is not None else "proxy",
+        "smb":    "NIFTY SMALLCAP 250 TRI − NIFTY 100 TRI",
+        "hml":    "NIFTY500 VALUE 50 TRI − NIFTY 500 TRI",
+        "wml":    "NIFTY200 MOMENTUM 30 TRI − NIFTY 500 TRI",
+        "qmj":    "NIFTY200 QUALITY 30 TRI − NIFTY 500 TRI",
+        "bab":    "NIFTY100 LOW VOLATILITY 30 TRI − NIFTY 100 TRI",
+    }
 
-    if len(factor_df) < 60:
-        return None, proxy_names
+    logger.info(f"6F returns: {list(factor_df.columns)}, {len(factor_df)} days, "
+                f"{factor_df.index[0].strftime('%d %b %Y')} → {factor_df.index[-1].strftime('%d %b %Y')}")
 
-    logger.info(
-        f"Factor returns built: {list(factor_df.columns)}, "
-        f"{len(factor_df)} daily observations"
-    )
-
-    return factor_df, proxy_names
+    return factor_df, source_names, None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AVAILABILITY CHECK
+# AVAILABILITY CHECKS (used by UI)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_factor_availability() -> Dict[str, bool]:
-    """
-    Return which factors are available (proxy found in mftool).
-    Used in the UI to explain which model variant will be run.
-
-    Returns:
-        {'market': True/False, 'smb': True/False, 'hml': True/False, 'wml': True/False}
-    """
+    """Which 4F factors are available. Used in Fund Analytics Factor tab."""
     factor_df, _ = get_factor_returns()
     if factor_df is None:
         return {f: False for f in ["market", "smb", "hml", "wml"]}
     return {f: f in factor_df.columns for f in ["market", "smb", "hml", "wml"]}
+
+
+def get_factor_availability_6f() -> Dict[str, bool]:
+    """Which 6F factors are available. Used in Factor Attribution page."""
+    factor_df, _, err = get_factor_returns_6f()
+    if factor_df is None:
+        return {f: False for f in ["market", "smb", "hml", "wml", "qmj", "bab"]}
+    return {f: f in factor_df.columns for f in ["market", "smb", "hml", "wml", "qmj", "bab"]}

@@ -35,11 +35,15 @@ LOG_DIR = DATA_DIR / "logs"
 # NSE TRI ENDPOINT
 # ============================================================================
 
+#NSE_TRI_ENDPOINT = (
+#    "https://www.niftyindices.com/Backpage.aspx/"
+#    "getTotalReturnIndexString"
+#)
+#copied from indice_loader standalone project, but changed to match the new endpoint
 NSE_TRI_ENDPOINT = (
-    "https://www.niftyindices.com/Backpage.aspx/"
-    "getTotalReturnIndexString"
+    "https://www.niftyindices.com/"
+    "BackPage/getTotalReturnIndexString"
 )
-
 
 # ============================================================================
 # HTTP CONFIGURATION
